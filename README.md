@@ -173,26 +173,68 @@ would become and says plainly that saving re-cuts it.
 The plan runs on a continuous counter that does not reset when a phase does — day 40 of
 a passage is followed by day 41 alongside, not by Psalm 1 again.
 
-**A reading is not logged until it has been thought about.** Tapping it opens a
-reflection rather than setting a flag; forty characters — about a sentence — before it
-will mark it read. Untick lives in the same sheet, which is what keeps the reflection
-reachable afterwards instead of stranded behind a completed checkbox. Writing one closes
-both the 05:35 item and that day's entry on the plan, because it is one act. Days
-already read before the gate existed keep their tick: the rule applies to the act of
-ticking, not retroactively.
+**A reading is not logged until it has been thought about.** Forty characters — about a
+sentence — before it will mark it read. Writing one closes both the 05:35 item and that
+day's entry on the plan, because it is one act. Days already read before the gate
+existed keep their tick: the rule applies to the act of ticking, not retroactively.
+
+### The reflection sits with the reading
+
+It is not a door you go through. In landscape it holds the right-hand column; in
+portrait it sticks to the bottom of the screen. Either way it is in front of you while
+you read, because a thought arrives mid-chapter and not after you have gone looking for
+somewhere to put it. It saves as you go, so scrolling away loses nothing.
+
+The day's references and the marker are **frozen** at the top of the reading column, so
+what you are reading and what you are marking with stay put while the chapter goes past
+underneath. Only the text scrolls.
+
+Tapping a day in the plan list switches the reading rather than opening a sheet, and the
+05:35 item on the Day tab takes you here.
+
+### Highlighters
+
+Three markers, meaning whatever you decide they mean — the app does not name them.
+Pick one up and taps mark verses; put it down and taps are taps again, so you can read
+and scroll without marking by accident.
+
+A marked verse tints in place and joins a list under the reflection, each with an arrow
+that drops the words and the reference into the note:
+
+```
+"He makes me lie down in green pastures;" — Psalm 23:2
+```
+
+Marks are keyed by book, chapter and verse rather than by reading day, so a verse stays
+marked however you come back to it — through the plan, through the reader, or on the
+next voyage.
 
 ### Carrying the text
 
 The reading plan needs no network — it is arithmetic. The *words* are another
 matter, and the Word tab will carry them.
 
-**"Carry the rest aboard" is the only thing in this app that touches the
-network, and it only runs on that tap.** It fetches every chapter the rest of
-the phase will ask for — about 0.6 MB for a 40-day passage — into the Cache API,
-one chapter at a time, and after that the reading is there with the link down.
-The button says "No link — try alongside" when the device knows it is offline.
+**Carrying the text is the only thing in this app that touches the network, and
+it only runs on a tap.** Two of them:
+
+| | |
+|---|---|
+| **Carry this passage** | Every chapter the rest of the phase will ask for — about 0.6 MB for a 40-day passage |
+| **Carry the whole Bible** | All 1,189 chapters, about 13 MB, six at a time |
+
+Both are resumable and neither re-downloads what is already aboard, so a dropped
+link means tapping again and nothing more. The button says "No link" when the
+device knows it is offline rather than firing a thousand doomed requests at sea.
 Nothing is ever fetched on render: a chapter that is not aboard shows its
 reference and says so.
+
+The resume reads the cache in one `cache.keys()` call rather than asking 1,189
+separate questions, and falls back to per-URL checks where that listing comes
+back empty — otherwise a browser quirk would quietly pull thirteen megabytes a
+second time.
+
+With the whole Bible aboard, the book picker opens any chapter of any book with
+the link down.
 
 Text comes from the [Free Use Bible API](https://bible.helloao.org/docs/), which
 needs no key, sets no limits, and serves the Berean Standard Bible under terms
@@ -393,6 +435,7 @@ Everything is in `localStorage` on the iPad. Nothing leaves the ship.
 | `watchbell:events` | Declared ship's business, by date |
 | `watchbell:weeks` | One entry per week, keyed by its Monday |
 | `watchbell:ranks` | Who jobs can be assigned to |
+| `watchbell:marks` | Highlighted verses, keyed by book, chapter and verse |
 | `watchbell:schema` | The storage version migrations run against |
 
 The reading's text is the one thing not in `localStorage`: it lives in the Cache
@@ -434,7 +477,7 @@ src/
   WeekTab.jsx                 look back and look forward
   PlansTab.jsx                the vault
   Timer.jsx                   interval run and stopwatch
-  Reflection.jsx              the reading gate
+  WordTab.jsx                 the reading, the reflection and the markers
   components/
     ExerciseFigure.jsx        animated SVG form demonstrations
   data/
@@ -445,6 +488,7 @@ src/
   voyage.js                   date arithmetic, and nothing else
   training.js                 reading the plan; the bout queue
   bible.js                    the reading's text, cache-first and cache-only
+  marks.js                    highlighted verses
   events.js                   ship's business, suspension, the graveyard rule
   jobs.js                     the job model and its carry arithmetic
   store.js                    the versioned stores, migration and export

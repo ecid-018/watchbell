@@ -19,6 +19,7 @@ export const K = {
   events: "watchbell:events",
   weeks: "watchbell:weeks",
   ranks: "watchbell:ranks",
+  marks: "watchbell:marks",
   mode: "watchbell:mode",
   phases: "watchbell:phases",
   // Pre-phases format. Still read on first launch after an update so an

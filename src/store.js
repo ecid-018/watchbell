@@ -10,7 +10,7 @@
 
 import { K, readJSON, writeJSON } from "./storage.js";
 
-export const SCHEMA = 2;
+export const SCHEMA = 3;
 
 /** Ranks, not names — the list is edited on the Standing tab. */
 export const DEFAULT_RANKS = ["Self", "2/E", "3/E", "4/E", "Oiler", "Fitter", "Wiper"];
@@ -21,6 +21,7 @@ const STORES = {
   events: [],
   weeks: {},
   ranks: DEFAULT_RANKS,
+  marks: {},
 };
 
 /**
@@ -38,6 +39,9 @@ export function migrateStores() {
       if (readJSON(K[name], null) === null) writeJSON(K[name], empty);
     }
   }
+
+  // 2 → 3: highlighted verses. Same shape of migration: create it empty.
+  if (at < 3 && readJSON(K.marks, null) === null) writeJSON(K.marks, {});
 
   if (at !== SCHEMA) writeJSON(K.schema, SCHEMA);
   return SCHEMA;
@@ -60,7 +64,7 @@ export const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${(seq++).
  */
 export function exportAll() {
   const out = { app: "watchbell", schema: SCHEMA, exported: new Date().toISOString(), data: {} };
-  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "phases", "read", "reflect", "figures", "mode"]) {
+  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "figures", "mode"]) {
     const v = readJSON(K[name], null);
     if (v !== null) out.data[K[name]] = v;
   }

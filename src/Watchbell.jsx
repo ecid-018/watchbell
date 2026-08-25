@@ -23,7 +23,7 @@ import { addDays, clockDate, dateKey, parseKey, prettyDate } from "./voyage.js";
 import { currentPhase, dayOf, endpointsOf, isComplete, legOf, legsOf, lengthOf, nameOf, readingDayOf } from "./phase.js";
 import { graceDays, onPlan, rollingSeven } from "./stats.js";
 import { useLandscape } from "./useLandscape.js";
-import Reflection from "./Reflection.jsx";
+import WordTab from "./WordTab.jsx";
 import BodyTab from "./BodyTab.jsx";
 import JobsTab from "./JobsTab.jsx";
 import WeekTab, { weekKey } from "./WeekTab.jsx";
@@ -32,7 +32,7 @@ import { readSession, sessionForDate, sessionsInWindow, sessionsDueInWindow, wri
 import { EVENT_TYPES, dayDoable, dayItems, dueSoon, eventOn, recoveryOn } from "./events.js";
 import { jobsInWindow, makeJob } from "./jobs.js";
 import { DEFAULT_RANKS, exportAll, loadStore, newId, saveStore } from "./store.js";
-import { TRANSLATION_NAME, countCached, fetchInto, parseRef, readCached, toLines } from "./bible.js";
+import { allRefs, countCached, fetchInto, listBooks, parseRef } from "./bible.js";
 
 export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // `now` lives in state so an app left open on the home screen rolls over at
@@ -46,7 +46,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [done, setDone] = useState(() => readLog(dateKey(new Date())));
   const [read, setRead] = useState(() => readJSON(K.read, {}) || {});
   const [reflect, setReflect] = useState(() => readJSON(K.reflect, {}) || {});
-  const [sheet, setSheet] = useState(null); // reading-plan day under reflection
+  const [sheet, setSheet] = useState(null); // the reading day the Word tab is on
   // How many times each figure has been opened. Once a movement is familiar it
   // stops asking for attention, so the list quietens down as the passage goes on.
   const [seenFigures, setSeenFigures] = useState(() => readJSON(K.figures, {}) || {});
@@ -59,8 +59,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [ranks, setRanks] = useState(() => loadStore("ranks"));
   const [declaring, setDeclaring] = useState(false);
   // The reading's own text, if it was carried aboard. Never fetched on render.
-  const [passage, setPassage] = useState(null);
   const [aboard, setAboard] = useState(null);
+  const [books, setBooks] = useState([]);
+  const [browse, setBrowse] = useState(null);
+  const [marks, setMarks] = useState(() => loadStore("marks"));
   const [loading, setLoading] = useState(null);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [exporting, setExporting] = useState(null);
@@ -170,6 +172,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => saveStore("events", events), [events]);
   useEffect(() => saveStore("weeks", weeks), [weeks]);
   useEffect(() => saveStore("ranks", ranks), [ranks]);
+  useEffect(() => saveStore("marks", marks), [marks]);
   useEffect(() => writeJSON(K.log(todayKey), done), [todayKey, done]);
 
   // One second, because the clock shows seconds. The heavy figures are memoised
@@ -181,6 +184,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       if (dateKey(fresh) !== todayKey) {
         setDone(readLog(dateKey(fresh)));
         setLegOverride(null);
+        setSheet(null);
       }
       setNow(fresh);
     };
@@ -225,19 +229,17 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   // Ticking a reading opens the reflection instead of setting the flag. Today's
   // reading also carries the 05:35 item, so writing one closes both.
-  const openReflection = (d) => setSheet(d);
+  const openReflection = (d) => { setSheet(d === readDay ? null : d); setBrowse(null); setTab("word"); };
 
   const saveReflection = (d, text) => {
     setReflect((r) => ({ ...r, [d]: text }));
     setRead((r) => ({ ...r, [d]: true }));
     if (d === todayReadDay) setDone((x) => ({ ...x, word: true }));
-    setSheet(null);
   };
 
   const clearReading = (d) => {
     setRead((r) => ({ ...r, [d]: false }));
     if (d === todayReadDay) setDone((x) => ({ ...x, word: false }));
-    setSheet(null);
   };
 
   const toggle = (item) => {
@@ -301,37 +303,38 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     return out;
   }, [phase, realDay]);
 
-  const shownRefs = useMemo(
-    () => [parseRef(plan.psalm), parseRef(plan.nt)].filter(Boolean),
-    [plan.psalm, plan.nt],
-  );
-
-  // Cache-first and cache-only. A miss shows the reference and says so.
-  useEffect(() => {
-    let alive = true;
-    setPassage(null);
-    (async () => {
-      const loaded = [];
-      for (const ref of shownRefs) {
-        const payload = await readCached(ref);
-        loaded.push({ ref, lines: payload ? toLines(payload) : null });
-      }
-      if (alive) setPassage(loaded);
-    })();
-    return () => { alive = false; };
-  }, [shownRefs, aboard?.have]);
+  // What the reader is looking at: the day's two chapters, or a browsed one.
+  const shownRefs = useMemo(() => {
+    if (browse) {
+      const b = books.find((x) => x.id === browse.book);
+      return [{ book: browse.book, chapter: browse.chapter, label: `${b?.commonName || browse.book} ${browse.chapter}` }];
+    }
+    return [parseRef(plan.psalm), parseRef(plan.nt)].filter(Boolean);
+  }, [browse, books, plan.psalm, plan.nt]);
 
   useEffect(() => {
     let alive = true;
-    countCached(bibleRefs).then((n) => alive && setAboard({ have: n, total: bibleRefs.length }));
+    countCached(bibleRefs).then((n) => alive && setAboard((a) => ({ ...a, have: n, total: bibleRefs.length })));
     return () => { alive = false; };
   }, [bibleRefs, loading]);
 
-  const carryThePassage = async () => {
-    setLoading({ done: 0, total: bibleRefs.length });
-    const tally = await fetchInto(bibleRefs, (p) => setLoading(p));
+  useEffect(() => { listBooks().then(setBooks); }, []);
+
+  const carry = async (refs) => {
+    setLoading({ done: 0, total: refs.length });
+    // Six lanes: enough that 1,189 chapters is a minute rather than three,
+    // few enough that a satellite link is not being asked to do something unkind.
+    const tally = await fetchInto(refs, (p) => setLoading(p), { concurrency: 6 });
     setLoading(null);
-    setAboard({ have: tally.got + tally.already, total: tally.total, failed: tally.failed });
+    const have = await countCached(bibleRefs);
+    setAboard({ have, total: bibleRefs.length, failed: tally.failed });
+  };
+
+  const carryThePassage = () => carry(bibleRefs);
+  const carryTheBible = async () => {
+    const list = books.length ? books : await listBooks();
+    if (!books.length) setBooks(list);
+    return carry(allRefs(list));
   };
 
   /* -------- pieces -------- */
@@ -700,129 +703,49 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     </div>
   );
 
+  // The reading day on screen: today's, unless a row in the plan list sent us
+  // to another one. Reset by the day rolling over, like every other override.
+  const shownReadDay = sheet ?? readDay;
+  const shownPlan = dayPlan(shownReadDay);
+
   const wordTab = () => (
-    <div className={wide ? "grid grid-cols-2 gap-4 items-start" : ""}>
-      <div className="wb-t rounded-2xl p-5 mb-4" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
-        <div style={eyebrow}>TODAY</div>
-        <div style={{ fontFamily: F.serif, fontSize: 27, lineHeight: 1.22, marginTop: 6, color: C.gold }}>{plan.psalm}</div>
-        <div style={{ fontFamily: F.serif, fontSize: 27, lineHeight: 1.22, color: C.text }}>{plan.nt}</div>
-        <div style={{ fontSize: 12, marginTop: 8, color: C.dim }}>About twelve minutes. One Psalm, one chapter.</div>
-        <button onClick={() => openReflection(readDay)} className="wb-t w-full rounded-xl mt-4 py-2.5"
-          style={{
-            fontSize: 13.5, fontWeight: 600,
-            background: isRead(readDay) ? "transparent" : C.gold,
-            color: isRead(readDay) ? C.text2 : dark ? "#0E1C22" : "#FFFFFF",
-            border: `1px solid ${isRead(readDay) ? C.line2 : C.gold}`,
-          }}>
-          {isRead(readDay) ? "Read your reflection" : "Write the reflection"}
-        </button>
-        {reflect[readDay] && (
-          <div style={{ fontFamily: F.serif, fontSize: 13, lineHeight: 1.5, marginTop: 12, color: C.text2, fontStyle: "italic" }}>
-            “{reflect[readDay]}”
-          </div>
-        )}
-      </div>
-      <div>
-        {aboard && (
-          <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.line2}` }}>
-            <div className="flex items-baseline justify-between">
-              <span style={{ ...eyebrow, color: aboard.have === aboard.total ? C.foam : C.dim2 }}>
-                {aboard.have === aboard.total ? "THE PASSAGE IS ABOARD" : "TEXT ABOARD"}
-              </span>
-              <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.dim }}>
-                {aboard.have} / {aboard.total}
-              </span>
-            </div>
-            {loading ? (
-              <>
-                <div className="rounded-full mt-2" style={{ height: 4, background: C.track }}>
-                  <div className="rounded-full" style={{
-                    height: 4, background: C.gold,
-                    width: `${loading.total ? (loading.done / loading.total) * 100 : 0}%`,
-                  }} />
-                </div>
-                <div style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 4, color: C.dim }}>
-                  carrying {loading.done} of {loading.total}
-                </div>
-              </>
-            ) : aboard.have < aboard.total ? (
-              <>
-                <button onClick={carryThePassage} disabled={online === false}
-                  className="wb-t w-full rounded-xl mt-2 py-2.5"
-                  style={{
-                    fontSize: 13, fontWeight: 600,
-                    background: online === false ? "transparent" : C.gold,
-                    color: online === false ? C.dim2 : dark ? "#0E1C22" : "#FFFFFF",
-                    border: `1px solid ${online === false ? C.line2 : C.gold}`,
-                  }}>
-                  {online === false ? "No link — try alongside" : "Carry the rest aboard"}
-                </button>
-                <div style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 6, color: C.dim }}>
-                  The one thing in this app that uses the network, and only on this tap.
-                  Do it alongside. About {Math.round(((aboard.total - aboard.have) * 8) / 100) / 10} MB
-                  of {TRANSLATION_NAME}, and then the link can go for the rest of the passage.
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 4, color: C.dim }}>
-                Every reading to the end of this phase is on the iPad. Nothing more to fetch.
-              </div>
-            )}
-            {aboard.failed > 0 && (
-              <div style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 6, color: C.oxide }}>
-                {aboard.failed} chapter{aboard.failed === 1 ? "" : "s"} would not come down. Tap
-                again while the link is up — what is already aboard is not fetched twice.
-              </div>
-            )}
-          </div>
-        )}
+    <div>
+      <WordTab
+        C={C} dark={dark} wide={wide}
+        plan={shownPlan} readDay={shownReadDay}
+        isRead={isRead(shownReadDay)} reflection={reflect[shownReadDay]} marks={marks}
+        onReflect={(d, text) => setReflect((r) => ({ ...r, [d]: text }))}
+        onRead={(d, text) => saveReflection(d, text)}
+        onUnread={(d) => clearReading(d)}
+        onMarks={setMarks}
+        refs={shownRefs} aboard={aboard} loading={loading} online={online}
+        onCarry={carryThePassage} onCarryAll={carryTheBible}
+        books={books} browse={browse} onBrowse={setBrowse}
+      />
 
-        {passage && passage.length > 0 && (
-          <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
-            {passage.map(({ ref, lines }) => (
-              <div key={ref.label} className="mb-3">
-                <div style={{ ...eyebrow, marginBottom: 4 }}>{ref.label.toUpperCase()}</div>
-                {lines ? lines.map((l, i) => (
-                  l.kind === "verse" ? (
-                    <p key={i} style={{ margin: "0 0 5px", fontFamily: F.serif, fontSize: 15, lineHeight: 1.6, color: C.text }}>
-                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.dim2, marginRight: 5, verticalAlign: "super" }}>{l.n}</span>
-                      {l.text}
-                    </p>
-                  ) : (
-                    <p key={i} style={{
-                      margin: l.kind === "heading" ? "10px 0 5px" : "0 0 6px",
-                      fontFamily: F.serif, fontSize: l.kind === "heading" ? 15 : 13,
-                      fontWeight: l.kind === "heading" ? 600 : 400,
-                      fontStyle: l.kind === "subtitle" ? "italic" : "normal",
-                      color: l.kind === "heading" ? C.gold : C.dim,
-                    }}>{l.text}</p>
-                  )
-                )) : (
-                  <div style={{ fontSize: 12, lineHeight: 1.45, color: C.dim }}>
-                    Not aboard. The reference stands; carry the text next time you have a link.
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ ...eyebrow, marginBottom: 6 }}>THE PASSAGE</div>
-        {Array.from({ length: 8 }, (_, k) => readDay - 2 + k).filter((d) => d >= 1).map((d) => {
-          const p = dayPlan(d);
-          const done_ = isRead(d);
-          return (
-            <button key={d} onClick={() => openReflection(d)}
-              className="wb-t w-full flex items-center gap-3 py-2.5 px-2 rounded-xl text-left"
-              style={{ background: d === readDay ? C.sub : "transparent" }}>
-              <span style={{ fontFamily: F.mono, fontSize: 10.5, width: 30, color: d === readDay ? C.amber : C.dim2 }}>D{String(d).padStart(2, "0")}</span>
-              <span className="flex-1" style={{ fontFamily: F.serif, fontSize: 14, color: done_ ? C.dim : C.text }}>{p.psalm} · {p.nt}</span>
-              {reflect[d] && <span style={{ fontFamily: F.serif, fontSize: 11, color: C.dim2 }}>✎</span>}
-              <span className="shrink-0 rounded-full" style={{ width: 15, height: 15, border: `1.5px solid ${done_ ? C.gold : C.ring}`, background: done_ ? C.gold : "transparent" }} />
-            </button>
-          );
-        })}
-      </div>
+      <div style={{ ...eyebrow, margin: "16px 0 6px" }}>THE PASSAGE</div>
+      {Array.from({ length: 8 }, (_, k) => readDay - 2 + k).filter((d) => d >= 1).map((d) => {
+        const p = dayPlan(d);
+        const done_ = isRead(d);
+        return (
+          <button key={d} onClick={() => { setSheet(d === shownReadDay ? null : d); setBrowse(null); }}
+            className="wb-t w-full flex items-center gap-3 py-2.5 px-2 rounded-xl text-left"
+            style={{ background: d === shownReadDay ? C.sub : "transparent" }}>
+            <span style={{ fontFamily: F.mono, fontSize: 10.5, width: 30, color: d === readDay ? C.amber : C.dim2 }}>
+              D{String(d).padStart(2, "0")}
+            </span>
+            <span className="flex-1" style={{ fontFamily: F.serif, fontSize: 14, color: done_ ? C.dim : C.text }}>
+              {p.psalm} · {p.nt}
+            </span>
+            {reflect[d] && <span style={{ fontFamily: F.serif, fontSize: 11, color: C.dim2 }}>✎</span>}
+            <span className="shrink-0 rounded-full" style={{
+              width: 15, height: 15,
+              border: `1.5px solid ${done_ ? C.gold : C.ring}`,
+              background: done_ ? C.gold : "transparent",
+            }} />
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -1070,15 +993,6 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
         </div>
       )}
 
-      {sheet !== null && (
-        <Reflection
-          C={C} dark={dark} day={sheet} plan={dayPlan(sheet)}
-          value={reflect[sheet]} isRead={isRead(sheet)}
-          onSave={(text) => saveReflection(sheet, text)}
-          onUnread={() => clearReading(sheet)}
-          onClose={() => setSheet(null)}
-        />
-      )}
     </div>
   );
 }

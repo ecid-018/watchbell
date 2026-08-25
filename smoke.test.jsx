@@ -12,7 +12,9 @@ import { doableForLeg, eveningFor, itemsForLeg } from "./src/schedule.js";
 import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
 import { CARRY_WARN, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
-import { fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
+import { allRefs, fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
+import { colourOf, marksIn, quote, toggleMark } from "./src/marks.js";
+import WordTab, { REFLECT_MIN } from "./src/WordTab.jsx";
 import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration, sessionForDate, timerMode } from "./src/training.js";
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
@@ -333,6 +335,7 @@ t("a missing chapter yields nothing, quietly", toLines(null).length === 0 && toL
 const shelf = new Map();
 globalThis.caches = {
   open: async () => ({
+    keys: async () => [...shelf.keys()].map((url) => ({ url })),
     match: async (url) => (shelf.has(url)
       ? { json: async () => JSON.parse(shelf.get(url)) }
       : undefined),
@@ -369,6 +372,14 @@ t("reading the cache uses no network",    calls === 1);
 const second = await fetchInto([psalm]);
 t("a second carry does not re-fetch",     second.already === 1 && second.got === 0 && calls === 1);
 
+// The same must hold when the cache will not enumerate itself, or a resumed
+// download would quietly pull thirteen megabytes a second time.
+const noKeys = globalThis.caches.open;
+globalThis.caches.open = async () => { const c = await noKeys(); delete c.keys; return c; };
+const blind = await fetchInto([psalm]);
+t("and not even without cache.keys()",    blind.already === 1 && blind.got === 0 && calls === 1);
+globalThis.caches.open = noKeys;
+
 failNext = true;
 const bad3 = await fetchInto([parseRef("Mark 3")]);
 t("a refused chapter is counted, not thrown", bad3.failed === 1 && bad3.got === 0);
@@ -377,6 +388,61 @@ failNext = false;
 let seen = 0;
 await fetchInto([parseRef("Matthew 1"), parseRef("Matthew 2")], () => { seen++; });
 t("progress is reported per chapter",     seen === 2);
+
+/* -------- marks -------- */
+
+const psa23 = { book: "PSA", chapter: 23, label: "Psalm 23" };
+let m = {};
+m = toggleMark(m, psa23, 1, "gold");
+t("a verse takes a colour",               colourOf(m, psa23, 1) === "gold");
+t("a different verse is untouched",       colourOf(m, psa23, 2) === null);
+m = toggleMark(m, psa23, 1, "foam");
+t("a second colour replaces the first",   colourOf(m, psa23, 1) === "foam");
+m = toggleMark(m, psa23, 1, "foam");
+t("the same colour lifts the mark",       colourOf(m, psa23, 1) === null);
+t("marks key by book, chapter and verse", Object.keys(toggleMark({}, psa23, 6, "gold"))[0] === "PSA.23.6");
+
+const lines = [
+  { kind: "heading", text: "The LORD Is My Shepherd" },
+  { kind: "verse", n: 1, text: "The LORD is my shepherd; I shall not want." },
+  { kind: "verse", n: 2, text: "He makes me lie down in green pastures;" },
+];
+const found = marksIn(toggleMark({}, psa23, 2, "oxide"), psa23, lines);
+t("marked verses come back in order",     found.length === 1 && found[0].verse === 2);
+t("headings are never marked",            marksIn({ "PSA.23.1": "gold" }, psa23, lines).every((x) => x.verse));
+t("a mark quotes itself for the note",    quote(found[0]) === '"He makes me lie down in green pastures;" — Psalm 23:2');
+
+/* -------- the reading is a place, not a pop-out -------- */
+
+const wordSide = renderToString(
+  <WordTab C={TD} dark wide plan={{ psalm: "Psalm 23", nt: "Matthew 1" }} readDay={23}
+    isRead={false} reflection="" marks={{}} onReflect={noop} onRead={noop} onUnread={noop}
+    onMarks={noop} refs={[psa23]} aboard={{ have: 2, total: 80 }} loading={null} online
+    onCarry={noop} onCarryAll={noop} books={[]} browse={null} onBrowse={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("the reflection sits with the reading", wordSide.includes("REFLECTION · READING DAY 23") && wordSide.includes("<textarea"));
+t("the marker is there to pick up",       wordSide.includes("MARKER") && wordSide.includes("tap a verse") === false);
+t("the whole Bible can be carried",       wordSide.includes("Carry the whole Bible"));
+t("the gate still holds at forty",        REFLECT_MIN === 40 && wordSide.includes("40 more"));
+
+// Freeze panes: the references and the note stay put, the chapter goes past.
+const sticky = (wordSide.match(/position:sticky/g) || []).length;
+t("the reference head is frozen",         wordSide.includes("TODAY") && sticky >= 2);
+t("a browsed chapter names itself frozen", (() => {
+  const browsed = renderToString(
+    <WordTab C={TD} dark wide plan={{ psalm: "Psalm 23", nt: "Matthew 1" }} readDay={23}
+      isRead={false} reflection="" marks={{}} onReflect={noop} onRead={noop} onUnread={noop}
+      onMarks={noop} refs={[{ book: "GEN", chapter: 3, label: "Genesis 3" }]}
+      aboard={{ have: 1, total: 1 }} loading={null} online onCarry={noop} onCarryAll={noop}
+      books={[{ id: "GEN", commonName: "Genesis", numberOfChapters: 50 }]}
+      browse={{ book: "GEN", chapter: 3 }} onBrowse={noop} />).replace(/<!--.*?-->/g, "");
+  return browsed.includes("Genesis 3") && !browsed.includes(">TODAY<");
+})());
+
+/* -------- the whole canon -------- */
+
+t("every book has chapters",              allRefs([{ id: "GEN", name: "Genesis", numberOfChapters: 50 }]).length === 50);
+t("refs carry a readable label",          allRefs([{ id: "PSA", commonName: "Psalms", numberOfChapters: 2 }])[1].label === "Psalms 2");
 
 console.log(bad ? `\n${bad} FAILED` : "\nall assertions hold");
 process.exit(bad ? 1 : 0);

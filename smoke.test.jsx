@@ -12,7 +12,7 @@ import { doableForLeg, eveningFor, itemsForLeg } from "./src/schedule.js";
 import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
 import { CARRY_WARN, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
-import { parseRef, toLines, urlFor } from "./src/bible.js";
+import { fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
 import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration, sessionForDate, timerMode } from "./src/training.js";
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
@@ -324,6 +324,59 @@ t("verses flatten, footnotes drop",       (() => {
       && !JSON.stringify(lines).includes("noteId");
 })());
 t("a missing chapter yields nothing, quietly", toLines(null).length === 0 && toLines({}).length === 0);
+
+/* -------- carrying the text: the whole round trip -------- */
+
+// A Cache API and a network, in memory. The point is to prove that what
+// fetchInto stores is what readCached later finds, without going near a real
+// link — the failure the live build had was in exactly that seam.
+const shelf = new Map();
+globalThis.caches = {
+  open: async () => ({
+    match: async (url) => (shelf.has(url)
+      ? { json: async () => JSON.parse(shelf.get(url)) }
+      : undefined),
+    put: async (url, res) => { shelf.set(url, JSON.stringify(await res.json())); },
+  }),
+  delete: async () => { shelf.clear(); return true; },
+};
+
+const CHAPTER = { chapter: { content: [
+  { type: "heading", content: ["The LORD Is My Shepherd"] },
+  { type: "verse", number: 1, content: [{ text: "The LORD is my shepherd;" }, { noteId: 50 }] },
+] } };
+let calls = 0, failNext = false;
+globalThis.fetch = async () => {
+  calls++;
+  if (failNext) return { ok: false, status: 503, clone: () => ({}), json: async () => ({}) };
+  const body = JSON.stringify(CHAPTER);
+  const make = () => ({ ok: true, status: 200, json: async () => JSON.parse(body), clone: () => make() });
+  return make();
+};
+
+const psalm = parseRef("Psalm 23");
+const before = await readCached(psalm);
+t("nothing is aboard to begin with",      before === null);
+t("and nothing was fetched to find out",  calls === 0);
+
+const first = await fetchInto([psalm]);
+t("the carry reports what it got",        first.got === 1 && first.failed === 0 && first.done === 1);
+
+const carried = await readCached(psalm);
+t("what was carried is what is read",     carried !== null && toLines(carried)[1].text === "The LORD is my shepherd;");
+t("reading the cache uses no network",    calls === 1);
+
+const second = await fetchInto([psalm]);
+t("a second carry does not re-fetch",     second.already === 1 && second.got === 0 && calls === 1);
+
+failNext = true;
+const bad3 = await fetchInto([parseRef("Mark 3")]);
+t("a refused chapter is counted, not thrown", bad3.failed === 1 && bad3.got === 0);
+failNext = false;
+
+let seen = 0;
+await fetchInto([parseRef("Matthew 1"), parseRef("Matthew 2")], () => { seen++; });
+t("progress is reported per chapter",     seen === 2);
 
 console.log(bad ? `\n${bad} FAILED` : "\nall assertions hold");
 process.exit(bad ? 1 : 0);

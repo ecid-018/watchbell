@@ -319,7 +319,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       if (alive) setPassage(loaded);
     })();
     return () => { alive = false; };
-  }, [shownRefs]);
+  }, [shownRefs, aboard?.have]);
 
   useEffect(() => {
     let alive = true;
@@ -331,7 +331,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     setLoading({ done: 0, total: bibleRefs.length });
     const tally = await fetchInto(bibleRefs, (p) => setLoading(p));
     setLoading(null);
-    setAboard({ have: tally.got + tally.already, total: tally.total });
+    setAboard({ have: tally.got + tally.already, total: tally.total, failed: tally.failed });
   };
 
   /* -------- pieces -------- */
@@ -768,10 +768,16 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
                 Every reading to the end of this phase is on the iPad. Nothing more to fetch.
               </div>
             )}
+            {aboard.failed > 0 && (
+              <div style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 6, color: C.oxide }}>
+                {aboard.failed} chapter{aboard.failed === 1 ? "" : "s"} would not come down. Tap
+                again while the link is up — what is already aboard is not fetched twice.
+              </div>
+            )}
           </div>
         )}
 
-        {passage && passage.some((p) => p.lines) && (
+        {passage && passage.length > 0 && (
           <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
             {passage.map(({ ref, lines }) => (
               <div key={ref.label} className="mb-3">

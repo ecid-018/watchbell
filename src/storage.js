@@ -9,8 +9,14 @@
 
 export const K = {
   log: (dateKey) => `watchbell:log:${dateKey}`,
+  train: (dateKey) => `watchbell:train:${dateKey}`,
   read: "watchbell:read",
+  reflect: "watchbell:reflect",
+  figures: "watchbell:figures",
   mode: "watchbell:mode",
+  phases: "watchbell:phases",
+  // Pre-phases format. Still read on first launch after an update so an
+  // existing passage survives, and still written so a rollback finds it.
   start: "watchbell:voyageStart",
 };
 

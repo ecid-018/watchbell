@@ -3,12 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Daily discipline log for a passage. New Orleans to India via the Cape of Good Hope.",
+  "description": "Daily discipline log for a passage. Offline, on the ship's clock.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "icons": "node scripts/gen-icons.mjs"
+    "icons": "node scripts/gen-icons.mjs",
+    "test": "vite build --config vite.smoke.config.js --logLevel error && node scripts/smoke.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

@@ -17,12 +17,14 @@ export default defineConfig({
       manifest: {
         name: "Watchbell",
         short_name: "Watchbell",
-        description:
-          "Daily discipline log for a passage. New Orleans to India via the Cape of Good Hope.",
+        description: "Daily discipline log for a passage. Offline, on the ship's clock.",
         start_url: "/watchbell/",
         scope: "/watchbell/",
         display: "standalone",
-        orientation: "portrait",
+        // Both orientations now have a real layout, so nothing is locked out.
+        // iOS ignores this either way; it is here so the manifest does not claim
+        // the opposite of what the app does.
+        orientation: "any",
         background_color: "#08151A",
         theme_color: "#0E1C22",
         icons: [

@@ -4,3 +4,5 @@ dev-dist
 dist-ssr
 .DS_Store
 *.local
+.smoke-out
+.preview-out

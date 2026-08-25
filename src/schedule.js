@@ -49,6 +49,32 @@ export const TAGS = {
   reset: { k: "dim", n: "Reset" },
 };
 
+/**
+ * The cash open, as a UTC instant rather than a wall-clock time.
+ *
+ * Every entry in the original leg table resolves to exactly this — 08:30 at
+ * UTC−5, 19:00 at UTC+5:30, and every step between. The table was never data:
+ * it was the New York open expressed in whatever time the ship was keeping.
+ * Holding it as one instant is what lets a passage between any two ports
+ * retime itself without a hand-written table.
+ */
+export const CASH_OPEN_UTC = 13 * 60 + 30;
+
+/** The cash open in ship's time, for a UTC offset in hours (5.5 for +5:30). */
+export const openForUTC = (hours) => {
+  const m = (((CASH_OPEN_UTC + Math.round(hours * 60)) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+};
+
+/** "−5", "+5:30", "0" — how an offset is written in the header and on a chip. */
+export const utcLabel = (hours) => {
+  if (!hours) return "0";
+  const a = Math.abs(hours);
+  const hh = Math.floor(a);
+  const mm = Math.round((a - hh) * 60);
+  return `${hours < 0 ? "−" : "+"}${hh}${mm ? `:${String(mm).padStart(2, "0")}` : ""}`;
+};
+
 export const mins = (h) => parseInt(h.slice(0, 2), 10) * 60 + parseInt(h.slice(2), 10);
 
 export const addMin = (h, m) => {
@@ -70,3 +96,40 @@ export const itemsForLeg = (leg) => {
 
 /** Items that actually count against completion — stood-down ones do not. */
 export const doableForLeg = (leg) => itemsForLeg(leg).filter((i) => !i.stood);
+
+/** Minutes since local midnight, for comparing the wall clock against a schedule. */
+export const minutesOfDay = (d) => d.getHours() * 60 + d.getMinutes();
+
+/**
+ * The item that owns this moment — the last one to have started.
+ *
+ * Before the first start of the day (anywhere from midnight to 05:30) the
+ * answer is the *last* item of the schedule: the night still belongs to
+ * lights out. Stood-down items are skipped, so on a Cape day the afternoon
+ * belongs to the admin block rather than to a session that is not happening.
+ */
+export const currentItem = (items, m) => {
+  const live = items.filter((i) => !i.stood);
+  if (!live.length) return null;
+  let cur = live[live.length - 1];
+  for (const i of live) if (mins(i.t) <= m) cur = i;
+  return cur;
+};
+
+/** The item due after this one, wrapping past midnight to tomorrow's first. */
+export const nextItem = (items, item) => {
+  const live = items.filter((i) => !i.stood);
+  if (!live.length || !item) return null;
+  return live.find((i) => mins(i.t) > mins(item.t)) ?? live[0];
+};
+
+/**
+ * When the current item's window closes: its own hard stop if it has one
+ * (the trading session does), otherwise the moment the next item starts.
+ */
+export const windowEnd = (items, item) => {
+  if (!item) return null;
+  if (item.endT) return item.endT;
+  const n = nextItem(items, item);
+  return n ? n.t : null;
+};

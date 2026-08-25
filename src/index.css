@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Moved out of the component's runtime <style> injection — same rules. */
+.wb-x::-webkit-scrollbar { display: none; }
+
+.wb-t {
+  transition: background-color .35s ease, color .35s ease, border-color .35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-t { transition: none; }
+}
+
+html, body {
+  /* Background is set from the active theme at runtime; this is the pre-paint
+     value so a cold launch does not flash white before React mounts. */
+  background: #08151A;
+  /* Stop iOS rubber-band scrolling from dragging the page off its ground. */
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Taps are the whole interface — never surface a text caret or selection. */
+button { -webkit-user-select: none; user-select: none; }

@@ -13,6 +13,12 @@ export const K = {
   read: "watchbell:read",
   reflect: "watchbell:reflect",
   figures: "watchbell:figures",
+  schema: "watchbell:schema",
+  jobs: "watchbell:jobs",
+  plans: "watchbell:plans",
+  events: "watchbell:events",
+  weeks: "watchbell:weeks",
+  ranks: "watchbell:ranks",
   mode: "watchbell:mode",
   phases: "watchbell:phases",
   // Pre-phases format. Still read on first launch after an update so an

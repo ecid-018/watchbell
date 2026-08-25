@@ -12,6 +12,10 @@ import Setup from "./Setup.jsx";
 import Watchbell from "./Watchbell.jsx";
 import { K, readJSON, writeJSON } from "./storage.js";
 import { appendPhase, arrivalUTCOf, currentPhase, endpointsOf, migrate, replaceCurrent } from "./phase.js";
+import { migrateStores } from "./store.js";
+
+// Storage is brought up to the current schema before anything reads it.
+migrateStores();
 
 export default function App() {
   const [phases, setPhases] = useState(() => migrate(readJSON(K.phases, null), readJSON(K.start, null)));

@@ -13,9 +13,9 @@
    whatever the ship happens to be doing today.
 ------------------------------------------------------------------ */
 
-import { doableForLeg } from "./schedule.js";
 import { readLog } from "./storage.js";
 import { dayOf, legOf, phaseForDate } from "./phase.js";
+import { dayDoable, dayItems } from "./events.js";
 import { addDays, dateKey, mondayOf, startOfDay } from "./voyage.js";
 
 export const GRACE_PER_WEEK = 2;
@@ -39,10 +39,13 @@ export function legForDate(phases, date) {
  * Completion for one date, resolved against that date's own leg — so a Cape
  * day is scored out of 11 items, not 12.
  */
-export function completionForDate(phases, date, live) {
+export function completionForDate(phases, date, live, events) {
   const leg = legForDate(phases, date);
   if (!leg) return null;
-  const doable = doableForLeg(leg);
+  // Scored against the day as it actually was: the template of that date, less
+  // anything ship's business suspended. A day taken by an arrival is a shorter
+  // day, not a failed one.
+  const doable = dayDoable(leg, dateKey(date), events);
   const log = logFor(dateKey(date), live);
   const hit = doable.filter((i) => log[i.id]).length;
   return { hit, total: doable.length, pct: doable.length ? Math.round((hit / doable.length) * 100) : 0 };
@@ -72,10 +75,10 @@ function elapsedDates(phases, from, to) {
  * Today is included, still in progress — the figure climbs through the day.
  * Returns null when the window holds no elapsed days at all.
  */
-export function rollingSeven(phases, today, live) {
+export function rollingSeven(phases, today, live, events) {
   const dates = elapsedDates(phases, addDays(today, -(ROLLING_WINDOW - 1)), today);
   if (!dates.length) return null;
-  const sum = dates.reduce((acc, d) => acc + completionForDate(phases, d, live).pct, 0);
+  const sum = dates.reduce((acc, d) => acc + completionForDate(phases, d, live, events).pct, 0);
   return { pct: Math.round(sum / dates.length), days: dates.length };
 }
 
@@ -86,12 +89,12 @@ export function rollingSeven(phases, today, live) {
  * or cleared. Only Monday..yesterday is judged: scoring today would burn a
  * grace day at 06:00 every morning before the day had a chance to happen.
  */
-export function graceDays(phases, today, live) {
+export function graceDays(phases, today, live, events) {
   const monday = mondayOf(today);
   const yesterday = addDays(today, -1);
   const judged = yesterday < monday ? [] : elapsedDates(phases, monday, yesterday);
   const consumed = judged.filter(
-    (d) => completionForDate(phases, d, live).pct < GRACE_THRESHOLD,
+    (d) => completionForDate(phases, d, live, events).pct < GRACE_THRESHOLD,
   ).length;
   return { left: Math.max(0, GRACE_PER_WEEK - consumed), consumed, judged: judged.length };
 }
@@ -103,10 +106,15 @@ export function graceDays(phases, today, live) {
  * and neither does a port stay logged as no trading alongside.
  * Returns null when the window contains no trading days at all.
  */
-export function onPlan(phases, today, live) {
-  const dates = elapsedDates(phases, addDays(today, -(ROLLING_WINDOW - 1)), today).filter(
-    (d) => legForDate(phases, d).trade,
-  );
+export function onPlan(phases, today, live, events) {
+  // A session suspended by ship's business is excluded from both sides, the
+  // same way a stood-down leg is. You cannot be off plan for a session the
+  // ship did not let you take.
+  const dates = elapsedDates(phases, addDays(today, -(ROLLING_WINDOW - 1)), today).filter((d) => {
+    if (!legForDate(phases, d).trade) return false;
+    const trade = dayItems(legForDate(phases, d), dateKey(d), events).find((i) => i.id === "trade");
+    return trade && !trade.stood;
+  });
   if (!dates.length) return null;
   const hit = dates.filter((d) => logFor(dateKey(d), live).trade).length;
   return { hit, total: dates.length };

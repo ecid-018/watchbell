@@ -15,7 +15,7 @@ import React, { useState, useMemo, useEffect } from "react";
 
 import { F, THEME, isDark } from "./theme.js";
 import {
-  TAGS, currentItem, dayPlan, doableForLeg, itemsForLeg,
+  TAGS, currentItem, dayPlan, eveningFor,
   minutesOfDay, nextItem, pretty, windowEnd,
 } from "./schedule.js";
 import { K, readJSON, readLog, writeJSON } from "./storage.js";
@@ -25,7 +25,13 @@ import { graceDays, onPlan, rollingSeven } from "./stats.js";
 import { useLandscape } from "./useLandscape.js";
 import Reflection from "./Reflection.jsx";
 import BodyTab from "./BodyTab.jsx";
+import JobsTab from "./JobsTab.jsx";
+import WeekTab, { weekKey } from "./WeekTab.jsx";
+import PlansTab from "./PlansTab.jsx";
 import { readSession, sessionForDate, sessionsInWindow, sessionsDueInWindow, writeSession } from "./training.js";
+import { EVENT_TYPES, dayDoable, dayItems, dueSoon, eventOn, recoveryOn } from "./events.js";
+import { jobsInWindow, makeJob } from "./jobs.js";
+import { DEFAULT_RANKS, exportAll, loadStore, newId, saveStore } from "./store.js";
 
 export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // `now` lives in state so an app left open on the home screen rolls over at
@@ -43,6 +49,15 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // How many times each figure has been opened. Once a movement is familiar it
   // stops asking for attention, so the list quietens down as the passage goes on.
   const [seenFigures, setSeenFigures] = useState(() => readJSON(K.figures, {}) || {});
+
+  // The stores behind Jobs, Week, Plans and ship's business.
+  const [jobs, setJobs] = useState(() => loadStore("jobs"));
+  const [plans, setPlans] = useState(() => loadStore("plans"));
+  const [events, setEvents] = useState(() => loadStore("events"));
+  const [weeks, setWeeks] = useState(() => loadStore("weeks"));
+  const [ranks, setRanks] = useState(() => loadStore("ranks"));
+  const [declaring, setDeclaring] = useState(false);
+  const [exporting, setExporting] = useState(null);
 
   const wide = useLandscape();
   const phase = currentPhase(phases);
@@ -70,13 +85,21 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const todayReadDay = readingDayOf(phase, realDay);
   const plan = dayPlan(readDay);
 
-  const items = useMemo(() => itemsForLeg(leg), [leg]);
+  const shownKeyEarly = previewing
+    ? dateKey(addDays(parseKey(phase.start), day - 1))
+    : todayKey;
+  const event = eventOn(events, shownKeyEarly);
+  const recovery = recoveryOn(events, shownKeyEarly);
+  const items = useMemo(
+    () => dayItems(leg, shownKeyEarly, events),
+    [leg, shownKeyEarly, events],
+  );
 
   // The session is the weekday's, so previewing a leg previews that leg's
   // training too: the leg picks a voyage day, the day picks a date, the date
   // picks the session. Live, that date is simply today.
   const shownDate = previewing ? addDays(parseKey(phase.start), day - 1) : now;
-  const shownKey = dateKey(shownDate);
+  const shownKey = shownKeyEarly;
   const session = sessionForDate(shownDate);
 
   // Heavy weather follows the leg — a stood-down leg is the Cape, or whatever
@@ -107,14 +130,14 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // The highlight is always the live day's, never the previewed leg's: it answers
   // "what should I be doing now", which a look-ahead cannot change.
   const liveLeg = legs[autoLegIdx];
-  const liveItems = useMemo(() => itemsForLeg(liveLeg), [liveLeg]);
+  const liveItems = useMemo(() => dayItems(liveLeg, todayKey, events), [liveLeg, todayKey, events]);
   const nowItem = currentItem(liveItems, minutesOfDay(now));
   const nowEnd = windowEnd(liveItems, nowItem);
   const upNext = nextItem(liveItems, nowItem);
 
   // The Standing tab always reports today, never the previewed leg — otherwise
   // previewing the Cape would score today's ticks against an 11-item day.
-  const todayDoable = useMemo(() => doableForLeg(liveLeg), [liveLeg]);
+  const todayDoable = useMemo(() => dayDoable(liveLeg, todayKey, events), [liveLeg, todayKey, events]);
   const hit = todayDoable.filter((i) => done[i.id]).length;
   const span = lengthOf(phase);
   const progress = atSea ? Math.min(100, Math.max(0, ((day - 1) / (span - 1)) * 100)) : 0;
@@ -123,11 +146,12 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // rather than re-read from storage, which is written only in an effect — so the
   // rolling number moves the moment a box is ticked instead of lagging one tick.
   const live = useMemo(() => ({ [todayKey]: done }), [todayKey, done]);
-  const r7 = useMemo(() => rollingSeven(phases, now, live), [phases, todayKey, live]);
-  const grace = useMemo(() => graceDays(phases, now, live), [phases, todayKey, live]);
-  const plan7 = useMemo(() => onPlan(phases, now, live), [phases, todayKey, live]);
+  const r7 = useMemo(() => rollingSeven(phases, now, live, events), [phases, todayKey, live, events]);
+  const grace = useMemo(() => graceDays(phases, now, live, events), [phases, todayKey, live, events]);
+  const plan7 = useMemo(() => onPlan(phases, now, live, events), [phases, todayKey, live, events]);
   const trained = useMemo(() => sessionsInWindow(now), [todayKey, trainLog]);
   const trainDue = useMemo(() => sessionsDueInWindow(now), [todayKey]);
+  const jobFigure = useMemo(() => jobsInWindow(jobs, now), [jobs, todayKey]);
 
   /* -------- persistence -------- */
 
@@ -135,6 +159,11 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => writeJSON(K.read, read), [read]);
   useEffect(() => writeJSON(K.reflect, reflect), [reflect]);
   useEffect(() => writeJSON(K.figures, seenFigures), [seenFigures]);
+  useEffect(() => saveStore("jobs", jobs), [jobs]);
+  useEffect(() => saveStore("plans", plans), [plans]);
+  useEffect(() => saveStore("events", events), [events]);
+  useEffect(() => saveStore("weeks", weeks), [weeks]);
+  useEffect(() => saveStore("ranks", ranks), [ranks]);
   useEffect(() => writeJSON(K.log(todayKey), done), [todayKey, done]);
 
   // One second, because the clock shows seconds. The heavy figures are memoised
@@ -210,6 +239,33 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     if (nowItem.id === "word") return openReflection(todayReadDay);
     setDone((d) => ({ ...d, [nowItem.id]: !d[nowItem.id] }));
   };
+
+  /* -------- jobs, plans, weeks, ship's business -------- */
+
+  const addJob = (fields) => setJobs((all) => [...all, makeJob(fields, todayKey)]);
+  const setJob = (id, patch) => setJobs((all) => all.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+
+  const addPlan = (d) => setPlans((all) => [...all, {
+    id: newId("plan"), title: d.title.trim(), notes: d.notes || "",
+    target: d.target || null, source: d.source || null,
+    status: "planned", created: todayKey,
+  }]);
+  const setPlan = (id, patch) => setPlans((all) => all.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+
+  // A plan does not become a job; it puts one on the list and stays in the vault.
+  const spawnJob = (plan) => {
+    addJob({ title: plan.title, detail: plan.source ? `From the vault · ${plan.source}` : "From the vault", assignee: ranks[0] || "Self", priority: "normal", from: plan.id });
+    setPlan(plan.id, { status: "active" });
+    setTab("jobs");
+  };
+
+  const declareEvent = (ev) => {
+    setEvents((all) => [...all.filter((e) => e.date !== ev.date), ev]);
+    setDeclaring(false);
+  };
+  const clearEvent = (dk) => setEvents((all) => all.filter((e) => e.date !== dk));
+
+  const due = useMemo(() => dueSoon(plans, now), [plans, todayKey]);
 
   /* -------- pieces -------- */
 
@@ -375,8 +431,122 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   /* -------- tabs -------- */
 
+  /** Declaring, or standing down, today's ship's business. */
+  const eventPanel = () => {
+    const [d, setD] = [declaring, setDeclaring];
+    if (event) {
+      return (
+        <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.oxide}66` }}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div style={{ ...eyebrow, color: C.oxide }}>SHIP'S BUSINESS — {event.type.toUpperCase()}</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.4, marginTop: 3, color: C.text }}>
+                {event.start} for {event.hours} h{event.note ? ` · ${event.note}` : ""}
+              </div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 3, color: C.dim }}>
+                Suspended work is not owed. The day scores out of what is left.
+              </div>
+            </div>
+            <button onClick={() => clearEvent(shownKey)} className="wb-t shrink-0 rounded-lg px-2.5 py-1.5"
+              style={{ fontSize: 11.5, color: C.text2, border: `1px solid ${C.line2}` }}>Stand down</button>
+          </div>
+        </div>
+      );
+    }
+    if (!d) {
+      return (
+        <button onClick={() => setD({ date: shownKey, type: "Arrival", start: "06:00", hours: "4", note: "" })}
+          className="wb-t w-full rounded-xl py-2.5 mb-3"
+          style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
+          Declare ship's business
+        </button>
+      );
+    }
+    const ok = d.date && d.start && Number(d.hours) > 0;
+    const fld = {
+      fontFamily: F.mono, fontSize: 16, color: C.text, height: 44,
+      background: C.sub, border: `1px solid ${C.line2}`,
+      WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
+    };
+    return (
+      <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+        <div style={eyebrow}>SHIP'S BUSINESS</div>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {EVENT_TYPES.map((t) => (
+            <button key={t} onClick={() => setD({ ...d, type: t })} className="wb-t px-2.5 py-1 rounded-full"
+              style={{
+                fontSize: 11.5, fontWeight: 500,
+                background: d.type === t ? C.oxide : "transparent",
+                color: d.type === t ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim,
+                border: `1px solid ${d.type === t ? C.oxide : C.line2}`,
+              }}>{t}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-3">
+          <div className="flex-[1.3]">
+            <div style={eyebrow}>DATE</div>
+            <input type="date" value={d.date} onChange={(e) => setD({ ...d, date: e.target.value })}
+              className="wb-t w-full rounded-xl mt-1 px-3" style={fld} />
+          </div>
+          <div className="flex-1">
+            <div style={eyebrow}>START</div>
+            <input type="time" value={d.start} onChange={(e) => setD({ ...d, start: e.target.value })}
+              className="wb-t w-full rounded-xl mt-1 px-3" style={fld} />
+          </div>
+          <div className="flex-1">
+            <div style={eyebrow}>HOURS</div>
+            <input type="number" inputMode="decimal" min="0.5" step="0.5" value={d.hours}
+              onChange={(e) => setD({ ...d, hours: e.target.value })}
+              className="wb-t w-full rounded-xl mt-1 px-3" style={fld} />
+          </div>
+        </div>
+        <input type="text" value={d.note} onChange={(e) => setD({ ...d, note: e.target.value })}
+          placeholder="Note — optional" autoCapitalize="sentences"
+          className="wb-t w-full rounded-xl mt-2 px-3" style={{ ...fld, fontFamily: F.ui, height: 42, fontSize: 14 }} />
+        <div className="flex gap-2 mt-3">
+          <button onClick={() => setD(false)} className="wb-t flex-1 rounded-xl py-2.5"
+            style={{ fontSize: 13, color: C.dim, border: `1px solid ${C.line2}` }}>Cancel</button>
+          <button onClick={() => ok && declareEvent({ ...d, hours: Number(d.hours) })} disabled={!ok}
+            className="wb-t flex-1 rounded-xl py-2.5" style={{
+              fontSize: 13, fontWeight: 600,
+              background: ok ? C.oxide : "transparent",
+              color: ok ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim2,
+              border: `1px solid ${ok ? C.oxide : C.line2}`,
+            }}>Declare</button>
+        </div>
+      </div>
+    );
+  };
+
+  const dueBanner = () => due.length > 0 && (
+    <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.line2}` }}>
+      <div style={{ ...eyebrow, color: due.some((p) => p.overdue) ? C.oxide : C.amber }}>
+        COMING UP FROM THE VAULT
+      </div>
+      {due.slice(0, 4).map((p) => (
+        <button key={p.id} onClick={() => setTab("plans")} className="wb-t w-full flex items-baseline gap-2 py-1 text-left">
+          <span className="flex-1" style={{ fontSize: 13, color: C.text }}>{p.title}</span>
+          <span style={{ fontFamily: F.mono, fontSize: 10, color: p.overdue ? C.oxide : C.dim }}>
+            {p.overdue ? "overdue" : p.target}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+
   const logTab = () => (
     <div className="space-y-0.5">
+      {dueBanner()}
+      {recovery && (
+        <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.amber}66` }}>
+          <div style={{ ...eyebrow, color: C.amber }}>RECOVERY DAY</div>
+          <div style={{ fontSize: 12.5, lineHeight: 1.45, marginTop: 3, color: C.text }}>
+            {recovery.from} ran past midnight. The morning is {recovery.lost} h later, and the
+            session and the desk are stood down. This is not a day you lost.
+          </div>
+        </div>
+      )}
+      {eventPanel()}
       {items.map((i) => {
         // While previewing another leg the log is read-only: ticking a day
         // that has not happened yet would pre-fill its record.
@@ -395,6 +565,28 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             <span className="self-stretch rounded-full" style={{ width: 3, background: accent, opacity: isDone ? 0.35 : 0.9 }} />
             <span className="flex-1">
               <span style={{ fontSize: wide ? 15 : 14, color: isDone ? C.dim : C.text, textDecoration: isDone ? "line-through" : "none", textDecorationColor: C.dim2 }}>{i.label}</span>
+              {i.id === "evening" && (
+                <span className="block" style={{ fontSize: 12.5, marginTop: 2, color: C.text2 }}>
+                  {eveningFor(shownDate)}
+                </span>
+              )}
+              {i.id === "vespers" && !previewing && (
+                <span className="block" style={{ marginTop: 4 }}>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); setDone((d) => ({ ...d, phoneOut: !d.phoneOut })); }}
+                    className="wb-t inline-flex items-center gap-1.5 rounded-md px-2 py-0.5"
+                    style={{
+                      fontFamily: F.mono, fontSize: 9.5, letterSpacing: ".08em",
+                      color: done.phoneOut ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim,
+                      background: done.phoneOut ? C.foam : "transparent",
+                      border: `1px solid ${done.phoneOut ? C.foam : C.line2}`,
+                    }}>
+                    PHONE OUT {done.phoneOut ? "YES" : "NO"}
+                  </span>
+                </span>
+              )}
               {i.id === "word" && (
                 <>
                   <span className="block" style={{ fontFamily: F.serif, fontSize: 12.5, marginTop: 2, color: C.gold }}>{plan.psalm} · {plan.nt}</span>
@@ -410,7 +602,22 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               )}
               {i.id === "trade" && i.stood && (
                 <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: C.oxide }}>
-                  no session — {leg.why}
+                  no session — {i.why || leg.why}
+                </span>
+              )}
+              {i.stood && i.id !== "trade" && (
+                <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: C.oxide }}>
+                  suspended — {i.why}
+                </span>
+              )}
+              {i.movedFor && (
+                <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: C.amber }}>
+                  moved clear of the {i.movedFor.toLowerCase()}
+                </span>
+              )}
+              {i.shifted && (
+                <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: C.amber }}>
+                  later, after the night
                 </span>
               )}
             </span>
@@ -470,7 +677,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const scoreTab = () => (
     <div>
-      <div className={wide ? "grid grid-cols-4 gap-3 mb-3" : ""}>
+      <div className={wide ? "grid grid-cols-5 gap-3 mb-3" : ""}>
         <div className="wb-t rounded-2xl p-5 mb-3 text-center" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
           <div style={eyebrow}>ROLLING SEVEN DAYS</div>
           <div style={{ fontSize: 60, fontWeight: 700, letterSpacing: "-.04em", lineHeight: 1.02, marginTop: 4, color: C.foam }}>
@@ -478,11 +685,12 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           </div>
           <div style={{ fontSize: 12.5, marginTop: 2, color: C.text2 }}>{hit} of {todayDoable.length} logged today</div>
         </div>
-        <div className={wide ? "contents" : "grid grid-cols-3 gap-2 mb-3"}>
+        <div className={wide ? "contents" : "grid grid-cols-2 gap-2 mb-3"}>
           {[
             ["Grace days", String(grace.left), "left this week", grace.left === 0 ? C.oxide : C.amber],
             ["On plan", plan7 ? `${plan7.hit}/${plan7.total}` : "—", "sessions to rule", C.foam],
             ["Trained", `${trained}/${trainDue}`, "sessions this week", trained ? C.foam : C.dim],
+            ["Jobs", `${jobFigure.done}/${jobFigure.total || 0}`, `${jobFigure.carried} carried`, C.amber],
           ].map(([t, v, s, col]) => (
             <div key={t} className="wb-t rounded-2xl p-4" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
               <div style={{ ...eyebrow, letterSpacing: ".1em" }}>{t.toUpperCase()}</div>
@@ -521,6 +729,36 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             style={{ fontSize: 13, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
             {atSea ? "Log arrival — go alongside" : "Put to sea — next passage"}
           </button>
+
+          <div style={{ ...eyebrow, marginTop: 16, marginBottom: 6 }}>WHO THE JOBS GO TO</div>
+          <div className="flex flex-wrap gap-1.5">
+            {ranks.map((r) => (
+              <span key={r} className="wb-t inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
+                style={{ fontSize: 11.5, color: C.text2, border: `1px solid ${C.line2}` }}>
+                {r}
+                <button onClick={() => setRanks(ranks.filter((x) => x !== r))}
+                  style={{ fontSize: 12, lineHeight: 1, color: C.dim2 }} aria-label={`Remove ${r}`}>×</button>
+              </span>
+            ))}
+          </div>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const v = new FormData(e.target).get("rank").toString().trim();
+            if (v && !ranks.includes(v)) setRanks([...ranks, v]);
+            e.target.reset();
+          }} className="flex gap-2 mt-2">
+            <input name="rank" type="text" placeholder="Add a rank" autoCapitalize="characters" autoCorrect="off"
+              className="wb-t flex-1 rounded-xl px-3" style={{
+                fontFamily: F.ui, fontSize: 16, color: C.text, height: 40,
+                background: C.card, border: `1px solid ${C.line2}`,
+              }} />
+            <button type="submit" className="wb-t rounded-xl px-4"
+              style={{ fontSize: 13, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>Add</button>
+          </form>
+          {ranks.length === 0 && (
+            <button onClick={() => setRanks(DEFAULT_RANKS)} className="wb-t w-full mt-2"
+              style={{ fontSize: 12, color: C.dim }}>Restore the standard list</button>
+          )}
         </div>
       </div>
 
@@ -565,7 +803,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const main = (
     <>
       <div className="flex wb-t shrink-0" style={{ borderBottom: `1px solid ${C.line}` }}>
-        {[["log", "The day"], ["body", "Body"], ["word", "Bible plan"], ["score", "Standing"]].map(([k, n]) => (
+        {[["log", "Day"], ["body", "Body"], ["jobs", "Jobs"], ["word", "Word"],
+          ["week", "Week"], ["plans", "Plans"], ["score", "Standing"]].map(([k, n]) => (
           <button key={k} onClick={() => setTab(k)} className="flex-1 py-3 wb-t"
             style={{ fontSize: wide ? 13 : 12.5, fontWeight: tab === k ? 600 : 500, color: tab === k ? C.text : C.dim, borderBottom: `2px solid ${tab === k ? C.amber : "transparent"}` }}>
             {n}
@@ -581,12 +820,26 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           <BodyTab
             C={C} dark={dark} wide={wide}
             session={session} heavy={heavy} autoHeavy={autoHeavy && dayRec?.heavy === undefined}
-            onHeavy={setHeavy} record={dayRec} onComplete={completeSession}
+            onHeavy={setHeavy} record={dayRec} onComplete={completeSession} recovery={recovery}
             seen={seenFigures}
             onSeen={(key) => setSeenFigures((m) => ({ ...m, [key]: (m[key] || 0) + 1 }))}
           />
         </div>
+        {tab === "jobs" && (
+          <JobsTab C={C} dark={dark} wide={wide} jobs={jobs} ranks={ranks} todayKey={todayKey}
+            onAdd={addJob} onSet={setJob} />
+        )}
         {tab === "word" && wordTab()}
+        {tab === "week" && (
+          <WeekTab C={C} dark={dark} wide={wide} weeks={weeks} today={now}
+            onSet={(k, v) => setWeeks((all) => ({ ...all, [k]: v }))}
+            figures={{ habit: r7 ? r7.pct : null, trained, due: trainDue, jobs: jobFigure, plan: plan7 }} />
+        )}
+        {tab === "plans" && (
+          <PlansTab C={C} dark={dark} wide={wide} plans={plans} today={now}
+            onAdd={addPlan} onSet={setPlan} onSpawn={spawnJob}
+            onExport={() => setExporting(JSON.stringify(exportAll(), null, 2))} />
+        )}
         {tab === "score" && scoreTab()}
       </div>
     </>
@@ -625,6 +878,46 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               : "TAP A LEG — THE DAY RETIMES ITSELF"}
         </div>
       </div>
+
+      {exporting !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-3"
+          style={{ background: dark ? "rgba(4,10,13,.72)" : "rgba(16,38,46,.42)" }}
+          onClick={() => setExporting(null)}>
+          <div className="wb-t w-full max-w-md rounded-[22px] overflow-hidden"
+            style={{ background: C.card, border: `1px solid ${C.line2}`, boxShadow: C.shadow }}
+            onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 pt-5 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+              <div style={eyebrow}>EVERYTHING, AS JSON</div>
+              <div style={{ fontSize: 13, lineHeight: 1.45, marginTop: 4, color: C.text2 }}>
+                {(exporting.length / 1024).toFixed(1)} KB. Copy it somewhere off the ship before a
+                reinstall — a download is not something iOS reliably lets a home-screen app do.
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <textarea readOnly value={exporting} rows={8}
+                onFocus={(e) => e.target.select()}
+                className="wb-t w-full rounded-xl px-3 py-2" style={{
+                  fontFamily: F.mono, fontSize: 11, lineHeight: 1.4, color: C.text2,
+                  background: C.sub, border: `1px solid ${C.line2}`, resize: "none",
+                }} />
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => { try { navigator.clipboard?.writeText(exporting); } catch (e) { /* select and copy by hand */ } }}
+                  className="wb-t flex-1 rounded-xl py-2.5" style={{
+                    fontSize: 13.5, fontWeight: 600, background: C.amber,
+                    color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.amber}`,
+                  }}>Copy</button>
+                <a href={`data:application/json;charset=utf-8,${encodeURIComponent(exporting)}`}
+                  download={`watchbell-${todayKey}.json`}
+                  className="wb-t flex-1 rounded-xl py-2.5 text-center" style={{
+                    fontSize: 13.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}`,
+                  }}>Save a file</a>
+              </div>
+              <button onClick={() => setExporting(null)} className="wb-t w-full mt-3"
+                style={{ fontSize: 12.5, color: C.dim }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {sheet !== null && (
         <Reflection

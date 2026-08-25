@@ -96,6 +96,34 @@ which a look-ahead cannot change.
 **Set the iPad to ship's time.** "Today" is the device's local date, so the log rolls
 over when the ship's day does.
 
+### The evening
+
+Night round at 20:00, then a rotating evening block so the slot always has
+something in it, a shower at 21:00, cabin reset and evening prayer together at
+21:30, lights out at 22:15. Both showers — the one after exercise and the one
+before turning in — tick on their own.
+
+| | |
+|---|---|
+| Mon | Engine room reading / study |
+| Tue | Laundry |
+| Wed | Trading journal review |
+| Thu | Cabin clean (heads and deck) |
+| Fri | Laundry |
+| Sat | Cabin deep clean — bedding, lockers, ports |
+| Sun | Call home / rest |
+
+The 21:30 row carries a **phone out of the cabin** toggle. It is logged with the
+day and nothing in the app comments on it.
+
+### The template has a history
+
+`since` and `until` on a line of `BASE` are what stop a change to the day from
+rewriting the past. A date is scored against the template *as it stood on that
+date*, so filling in the evening did not retroactively turn every logged day of
+the passage into a worse one, and `cabin` is retired rather than deleted so the
+days you ticked it keep the credit.
+
 ---
 
 ## Phases: at sea, or alongside
@@ -217,6 +245,89 @@ same movement name carries two different keys.
 
 ---
 
+## Ship's business
+
+Arrival, departure, bunkering and a Suez-type transit land at all hours. Declare
+one on the Day tab — type, start, duration — for today or any future date, and
+the day bends rather than breaking.
+
+| | |
+|---|---|
+| **Suspended** | Trading, exercise, the evening block, where they fall inside the window |
+| **Protected** | Bible reading, both showers, lights out — moved clear of the window instead |
+| **Untouched** | Rounds, daywork, the admin block. Ship's business *is* the day's work |
+
+A suspended item is `stood`, which is the same mechanism the Cape leg already
+uses: greyed with the reason, and excluded by `dayDoable`. That exclusion is the
+point and it is not a special case anyone has to remember — **a day taken by
+ship's business is scored out of a shorter day**, so it cannot cost a percentage
+and cannot burn a grace day. An arrival at 06:00 for four hours leaves eleven
+items owed instead of thirteen.
+
+### Graveyard
+
+If an event runs past midnight, the following day is a **recovery day**: the
+personal morning moves later by the sleep lost — capped at three hours, and
+shifted as a block so it keeps its spacing rather than stacking on one minute —
+and the trading session stands down, as does the training session if it was a
+HIIT day. It is marked as recovery on the Day and Body tabs, in the plain words
+that it is not a day you lost.
+
+---
+
+## Jobs
+
+A working list, not a habit tracker, and deliberately never averaged into the
+habit percentage — they are different kinds of thing.
+
+Add a job with a title, optional detail, an assignee and a priority. Assignees
+are ranks rather than names, and the list is edited on the Standing tab.
+Today's list is grouped by rank, urgent first, then longest-carried.
+
+**Carry-over is derived, not maintained.** An open job is on today's list by
+definition, and how long it has been there is read off its creation date. Nothing
+has to happen at midnight, so nothing can go wrong at midnight. Past three days
+the row turns oxide — that is the signal, and there is no notification.
+
+Done, Carry or Drop. A dropped job is archived and reopenable, never deleted.
+
+---
+
+## The week
+
+Two halves, on the Week tab.
+
+**Look back** is read off what already happened — habit percentage, sessions
+trained, jobs done against carried, sessions on plan — so the only thing to fill
+in is the trading journal review.
+
+**Look forward** is three priorities and a plan for the week. When a new week
+starts, last week's three appear beside the new ones and stay tickable, because
+seeing what did not get done is the point of having written them.
+
+Every week is kept; the arrows walk back through them.
+
+---
+
+## The vault
+
+Long-horizon items that are not today's work: office instructions, planned
+overhauls, surveys, inspections, class items. Each has a title, notes, an
+optional target date, an optional source (Office / Class / Own / Superintendent)
+and a status.
+
+- Anything falling due inside **fourteen days** surfaces as a banner on the Day tab, overdue in oxide
+- One tap sends a plan to the job list, copying the title and marking the plan in progress
+- Plans outlive weeks and voyages — this is the app's long-term memory
+
+**Export writes the whole app out as JSON** — jobs, plans, weeks, phases, and
+every daily and training record — into a copyable sheet with a download link.
+The sheet exists because iOS standalone cannot be relied on to complete a
+download; copying is the path that always works. Take one before any reinstall:
+deleting the home-screen icon takes everything with it.
+
+---
+
 ## The figures on the Standing tab
 
 All computed from the stored daily records on every read — nothing is cached or rolled
@@ -229,6 +340,7 @@ each date resolves against whichever phase covered it.
 | **Grace days** | Two per calendar week, reset Monday. Any day finishing under 50% burns one. Only **Monday to yesterday** is judged — today is never scored, or you would burn a grace day at 06:00 every morning. The tile turns oxide red at zero. |
 | **On plan** | Over the same seven days, how many trade-enabled days had the trading session ticked. Days on a stood-down leg are excluded from both sides, as is a port stay logged as no trading alongside. |
 | **Trained** | Sessions marked complete over the same seven days, against the days that had a session to do at all. Rest days are not counted on either side. |
+| **Jobs** | Closed against closed-plus-still-carrying over the same seven days. A count, never a percentage, and never averaged into the habit figure. |
 
 *By thread* and *X of Y logged today* always report **today**, even while you are
 previewing another leg.
@@ -247,8 +359,21 @@ Everything is in `localStorage` on the iPad. Nothing leaves the ship.
 | `watchbell:read` | Reading-plan progress, keyed by the continuous reading day |
 | `watchbell:reflect` | One reflection per reading day |
 | `watchbell:figures` | How many times each form figure has been opened |
+| `watchbell:jobs` | Every job, open and archived |
+| `watchbell:plans` | The vault |
+| `watchbell:events` | Declared ship's business, by date |
+| `watchbell:weeks` | One entry per week, keyed by its Monday |
+| `watchbell:ranks` | Who jobs can be assigned to |
+| `watchbell:schema` | The storage version migrations run against |
 | `watchbell:mode` | `"auto"` / `"light"` / `"dark"` |
 | `watchbell:voyageStart` | Pre-phases departure date. Still read on first launch after an update, and still written, so a rollback finds it |
+
+Storage is **versioned**. `migrateStores()` runs once at boot, before anything
+reads, and every step is additive and guarded so a migration interrupted
+half-way resumes rather than repeating. Nothing in `src/store.js` deletes or
+rewrites what it finds — the only copy of this data is on one iPad in the middle
+of an ocean. A future change that cannot be made additively should write a new
+key alongside the old one, not over it.
 
 Every access is wrapped defensively: if iOS refuses `localStorage` (storage pressure,
 private browsing) the app drops to session-only rather than failing to start.
@@ -272,6 +397,9 @@ src/
   Setup.jsx                   standing orders — a passage or a port stay
   Watchbell.jsx               the shell: clock, now-band, rail, tabs
   BodyTab.jsx                 the day's training
+  JobsTab.jsx                 the engine room list
+  WeekTab.jsx                 look back and look forward
+  PlansTab.jsx                the vault
   Timer.jsx                   interval run and stopwatch
   Reflection.jsx              the reading gate
   components/
@@ -283,6 +411,9 @@ src/
   phase.js                    routes, generated legs, the phase list
   voyage.js                   date arithmetic, and nothing else
   training.js                 reading the plan; the bout queue
+  events.js                   ship's business, suspension, the graveyard rule
+  jobs.js                     the job model and its carry arithmetic
+  store.js                    the versioned stores, migration and export
   stats.js                    rolling seven, grace days, on plan, trained
   storage.js                  localStorage keys and safe accessors
   useLandscape.js             is there room to work side by side

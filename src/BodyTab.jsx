@@ -101,7 +101,7 @@ const Fold = ({ C, title, count, open, onToggle, children }) => (
   </div>
 );
 
-export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record, onComplete, autoHeavy, seen = {}, onSeen = () => {} }) {
+export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record, onComplete, autoHeavy, recovery = null, seen = {}, onSeen = () => {} }) {
   const [openWarm, setOpenWarm] = useState(false);
   const [openAfter, setOpenAfter] = useState(false);
   const [rules, setRules] = useState(false);
@@ -147,6 +147,16 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
         {session.duration > 0 && <span>{session.duration} min</span>}
         {session.gear && <span>{session.gear}</span>}
       </div>
+
+      {recovery && (
+        <div className="wb-t rounded-xl mt-3 p-3" style={{ background: C.panel, border: `1px solid ${C.amber}66` }}>
+          <div style={{ ...eyebrow, color: C.amber }}>RECOVERY DAY</div>
+          <div style={{ fontSize: 12.5, lineHeight: 1.45, marginTop: 3, color: C.text }}>
+            {recovery.from} ran past midnight and took {recovery.lost} h of the morning. Nothing hard
+            today — walk it or take it off. The week's figure does not hold this against you.
+          </div>
+        </div>
+      )}
 
       {heavy && (
         <div className="wb-t rounded-xl mt-3 p-3" style={{ background: dark ? "#2A130D" : "#F6E5E0", border: `1px solid ${C.oxide}66` }}>

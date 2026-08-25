@@ -26,6 +26,15 @@ export const dayPlan = (day) => ({
   nt: NT[(day - 1) % NT.length],
 });
 
+/**
+ * The template, and when each line of it was true.
+ *
+ * `since` and `until` exist so that changing the day does not rewrite the past.
+ * A day is scored against the template as it stood *on that day*, so adding the
+ * evening block did not suddenly make every logged day of the passage look like
+ * a worse one. Same reason `cabin` is retired rather than deleted: the days you
+ * ticked it still get the credit.
+ */
 export const BASE = [
   { id: "wake", t: "0530", label: "Wake, hydrate, make the bunk", tag: "reset" },
   { id: "word", t: "0535", label: "Prayer and Bible reading", tag: "word" },
@@ -36,10 +45,33 @@ export const BASE = [
   { id: "admin", t: "1500", label: "Admin block", tag: "duty" },
   { id: "trade", t: "", label: "Trading session", tag: "desk" },
   { id: "round-pm", t: "2000", label: "Night round", tag: "duty" },
-  { id: "cabin", t: "2115", label: "Cabin reset", tag: "reset" },
-  { id: "vespers", t: "2130", label: "Evening prayer, phone down", tag: "word" },
+  { id: "evening", t: "2030", label: "Evening block", tag: "reset", since: "2026-08-25" },
+  { id: "shower-pm", t: "2100", label: "Shower", tag: "reset", since: "2026-08-25" },
+  { id: "cabin", t: "2115", label: "Cabin reset", tag: "reset", until: "2026-08-25" },
+  { id: "vespers", t: "2130", label: "Evening prayer, phone down", tag: "word", until: "2026-08-25" },
+  { id: "vespers", t: "2130", label: "Cabin reset and evening prayer", tag: "word", since: "2026-08-25" },
   { id: "sleep", t: "2215", label: "Lights out", tag: "reset" },
 ];
+
+/**
+ * The evening block rotates by weekday, so the slot always has something in it
+ * rather than being open time. Index 0 is Sunday, to match Date#getDay.
+ */
+export const EVENING = [
+  "Call home / rest",
+  "Engine room reading / study",
+  "Laundry",
+  "Trading journal review",
+  "Cabin clean (heads and deck)",
+  "Laundry",
+  "Cabin deep clean — bedding, lockers, ports",
+];
+
+export const eveningFor = (date) => EVENING[date.getDay()];
+
+/** The template as it stood on a date. */
+export const baseOn = (dateKey) =>
+  BASE.filter((b) => (!b.since || b.since <= dateKey) && (!b.until || b.until > dateKey));
 
 export const TAGS = {
   duty: { k: "text2", n: "Duty" },
@@ -85,9 +117,9 @@ export const addMin = (h, m) => {
 export const pretty = (h) => `${h.slice(0, 2)}:${h.slice(2)}`;
 
 /** The day's items retimed to a leg's cash open. Pure — same expression the UI used. */
-export const itemsForLeg = (leg) => {
+export const itemsForLeg = (leg, dateKey = "9999-12-31") => {
   const o = leg.open.replace(":", "");
-  return BASE.map((b) => {
+  return baseOn(dateKey).map((b) => {
     if (b.id === "trade") return { ...b, t: addMin(o, -30), endT: addMin(o, 105), stood: !leg.trade };
     if (b.id === "round-pm" && leg.lateRound) return { ...b, t: "2200" };
     return b;
@@ -95,7 +127,7 @@ export const itemsForLeg = (leg) => {
 };
 
 /** Items that actually count against completion — stood-down ones do not. */
-export const doableForLeg = (leg) => itemsForLeg(leg).filter((i) => !i.stood);
+export const doableForLeg = (leg, dateKey) => itemsForLeg(leg, dateKey).filter((i) => !i.stood);
 
 /** Minutes since local midnight, for comparing the wall clock against a schedule. */
 export const minutesOfDay = (d) => d.getHours() * 60 + d.getMinutes();

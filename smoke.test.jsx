@@ -4,7 +4,14 @@ import Watchbell from "./src/Watchbell.jsx";
 import Setup from "./src/Setup.jsx";
 import { appendPhase, migrate, generateLegs, nameOf, lengthOf, legsOf } from "./src/phase.js";
 import BodyTab from "./src/BodyTab.jsx";
+import JobsTab from "./src/JobsTab.jsx";
+import WeekTab from "./src/WeekTab.jsx";
+import PlansTab from "./src/PlansTab.jsx";
 import { THEME } from "./src/theme.js";
+import { doableForLeg, eveningFor, itemsForLeg } from "./src/schedule.js";
+import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
+import { CARRY_WARN, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
+import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
 import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration, sessionForDate, timerMode } from "./src/training.js";
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
@@ -173,6 +180,112 @@ t("learned movements go quiet",          (() => {
 })());
 t("collapsed rows draw no figure",       !wedFresh.includes('class="xf"'));
 t("the component is used as supplied",   exerciseCue("renegade-row").startsWith("Feet wide for balance"));
+
+/* -------- the evening, and the template's own history -------- */
+
+const OLD = "2026-08-01", NEW = "2026-08-26";
+// A leg keeping UTC−5, so the trading session sits at 08:00 and a morning
+// arrival actually collides with it. On a UTC+8 leg the desk is a night desk
+// and the same arrival would leave it alone — correctly, but it would prove
+// nothing about suspension.
+const seaLeg = legsOf({ kind: "voyage", from: "A", to: "B", days: 40, utc0: -5, utc1: -5 })[0];
+const ids = (dk) => itemsForLeg(seaLeg, dk).map((i) => i.id);
+
+t("the evening is filled in",            ids(NEW).includes("evening") && ids(NEW).includes("shower-pm"));
+t("both showers stand alone",            ids(NEW).filter((i) => i === "prep" || i === "shower-pm").length === 2);
+t("21:30 merges cabin and prayer",       itemsForLeg(seaLeg, NEW).find((i) => i.id === "vespers").label === "Cabin reset and evening prayer");
+t("the past is scored as it was",        ids(OLD).includes("cabin") && !ids(OLD).includes("evening"));
+t("adding items did not rewrite history", doableForLeg(seaLeg, OLD).length === 12 && doableForLeg(seaLeg, NEW).length === 13);
+t("the evening block rotates all seven", new Set([0,1,2,3,4,5,6].map((d) => eveningFor(new Date(2026, 7, 23 + d)))).size === 6);
+t("Wednesday is the journal review",     eveningFor(new Date(2026, 7, 26)) === "Trading journal review");
+
+/* -------- ship's business -------- */
+
+const arrival = { date: NEW, type: "Arrival", start: "05:00", hours: 6 };
+const overnight = { date: NEW, type: "Bunkering", start: "20:00", hours: 7 };
+const byId = (list) => Object.fromEntries(list.map((i) => [i.id, i]));
+
+const plain = byId(dayItems(seaLeg, NEW, []));
+const arr = byId(dayItems(seaLeg, NEW, [arrival]));
+t("trading and exercise suspend",        arr.trade.stood && arr.train.stood);
+t("the reason is the event",             arr.trade.why === "arrival");
+t("Bible reading is moved, not lost",    !arr.word.stood && arr.word.movedFor === "Arrival" && arr.word.t > plain.word.t);
+t("the morning shower moves with it",    !arr.prep.stood && arr.prep.movedFor === "Arrival");
+t("lights out is untouched off-window",  arr.sleep.t === plain.sleep.t);
+t("a shorter day, not a failed one",     dayDoable(seaLeg, NEW, [arrival]).length < dayDoable(seaLeg, NEW, []).length);
+t("suspended work is never owed",        dayDoable(seaLeg, NEW, [arrival]).every((i) => !i.stood));
+
+const night = byId(dayItems(seaLeg, NEW, [overnight]));
+t("the evening block suspends at night", night.evening.stood);
+t("the evening shower is moved late",    night["shower-pm"].movedFor === "Bunkering");
+
+/* -------- graveyard -------- */
+
+const after = "2026-08-27";
+const rec = recoveryOn([overnight], after);
+t("an overnight run earns recovery",     rec && rec.lost === 3 && rec.from === "Bunkering");
+t("the shift is capped at three hours",  lostTo({ start: "20:00", hours: 12 }) === 3);
+t("a day that ends before midnight does not", recoveryOn([arrival], "2026-08-27") === null);
+const morning = byId(dayItems(seaLeg, after, [overnight]));
+t("the wake moves later by what was lost", morning.wake.t === "0830" && morning.wake.shifted);
+t("the morning keeps its spacing",       morning.word.t === "0835" && morning.prep.t === "0940");
+t("the desk stands down on recovery",    morning.trade.stood && /recovery/.test(morning.trade.why));
+
+/* -------- jobs -------- */
+
+const j0 = makeJob({ title: "Purifier overhaul", assignee: "2/E", priority: "urgent" }, "2026-08-20");
+const j1 = makeJob({ title: "Sounding pipes", assignee: "Oiler" }, NEW);
+t("a job starts open and owned",         j0.status === "open" && j0.assignee === "2/E");
+t("carry is read off the calendar",      carriedFor(j0, NEW) === 6 && carriedFor(j1, NEW) === 0);
+t("the carry label reads plainly",       carryLabel(0) === "today" && carryLabel(2) === "3rd day");
+t("carrying past three days warns",      carriedFor(j0, NEW) >= CARRY_WARN);
+t("urgent sorts to the top",             groupByAssignee([j1, j0], ["2/E", "Oiler"], NEW)[0][0] === "2/E");
+t("dropped is archived, not deleted",    (() => {
+  const dropped = { ...j1, status: "dropped", droppedOn: NEW };
+  return [j0, dropped].filter((j) => j.status === "dropped").length === 1;
+})());
+t("jobs are counted, never averaged in", (() => {
+  const w = jobsInWindow([{ ...j0, status: "done", doneOn: NEW }, j1], new Date(2026, 7, 26));
+  return w.done === 1 && typeof w.total === "number" && !("pct" in w);
+})());
+
+/* -------- plans -------- */
+
+const soon = { id: "p1", title: "Class survey", status: "planned", target: "2026-09-02" };
+const far = { id: "p2", title: "Dry dock", status: "planned", target: "2027-01-01" };
+const shut = { id: "p3", title: "Done thing", status: "done", target: "2026-08-26" };
+const surfaced = dueSoon([soon, far, shut], new Date(2026, 7, 26));
+t("plans inside fourteen days surface",  surfaced.length === 1 && surfaced[0].id === "p1");
+t("finished plans stay down",            !surfaced.some((p) => p.id === "p3"));
+
+/* -------- the stores -------- */
+
+t("the schema is versioned",             SCHEMA >= 2);
+t("ranks are ranks, not names",          DEFAULT_RANKS[0] === "Self" && DEFAULT_RANKS.includes("Fitter"));
+
+/* -------- the new tabs render -------- */
+
+const TD = THEME.dark;
+const tabRenders = [
+  ["Jobs, empty", <JobsTab C={TD} dark wide={false} jobs={[]} ranks={DEFAULT_RANKS} todayKey={NEW} onAdd={noop} onSet={noop} />],
+  ["Jobs, loaded", <JobsTab C={TD} dark wide jobs={[j0, { ...j1, status: "dropped", droppedOn: NEW }]} ranks={DEFAULT_RANKS} todayKey={NEW} onAdd={noop} onSet={noop} />],
+  ["Week, blank", <WeekTab C={TD} dark wide={false} weeks={{}} today={new Date(2026, 7, 26)} onSet={noop}
+      figures={{ habit: 71, trained: 3, due: 6, jobs: { done: 2, total: 5, carried: 3 }, plan: { hit: 4, total: 5 } }} />],
+  ["Week, with history", <WeekTab C={TD} dark wide weeks={{ "2026-08-17": { review: "r", plan: "p", priorities: [{ text: "Purifier", done: true }, { text: "", done: false }, { text: "", done: false }] } }}
+      today={new Date(2026, 7, 26)} onSet={noop}
+      figures={{ habit: null, trained: 0, due: 0, jobs: { done: 0, total: 0, carried: 0 }, plan: null }} />],
+  ["Plans, empty", <PlansTab C={TD} dark wide={false} plans={[]} today={new Date(2026, 7, 26)} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop} />],
+  ["Plans, loaded", <PlansTab C={TD} dark wide plans={[soon, far, shut]} today={new Date(2026, 7, 26)} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop} />],
+];
+for (const [label, el] of tabRenders) {
+  try { renderToString(el); t(`renders: ${label}`, true); }
+  catch (e) { t(`renders: ${label} — ${e.message}`, false); }
+}
+
+const weekLoaded = renderToString(tabRenders[3][1]).replace(/<!--.*?-->/g, "");
+t("last week's three carry forward",     weekLoaded.includes("LAST WEEK&#x27;S THREE") && weekLoaded.includes("Purifier"));
+const plansLoaded = renderToString(tabRenders[5][1]).replace(/<!--.*?-->/g, "");
+t("the vault offers its own backup",     plansLoaded.includes("Export everything to JSON"));
 
 console.log(bad ? `\n${bad} FAILED` : "\nall assertions hold");
 process.exit(bad ? 1 : 0);

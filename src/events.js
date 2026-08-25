@@ -22,8 +22,15 @@ export const EVENT_TYPES = ["Arrival", "Departure", "Bunkering", "Drill", "Surve
 /** What ship's business displaces. */
 const SUSPEND = new Set(["trade", "train", "evening"]);
 
-/** What it does not get to displace — moved clear instead. */
-const PROTECT = new Set(["word", "prep", "shower-pm", "sleep"]);
+/**
+ * What it does not get to displace — moved clear instead.
+ *
+ * `vespers` is here because the whole Word thread is non-negotiable, not just
+ * the morning half of it. Leaving it out meant a seven-hour bunkering left
+ * evening prayer due at 21:30 and quietly missable, which is the one shape of
+ * failure this app is built to refuse.
+ */
+const PROTECT = new Set(["word", "vespers", "prep", "shower-pm", "sleep"]);
 
 /** The most of the next morning a night's work is allowed to take. */
 export const GRAVEYARD_CAP = 3;

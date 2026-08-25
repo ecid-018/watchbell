@@ -12,6 +12,7 @@ import { doableForLeg, eveningFor, itemsForLeg } from "./src/schedule.js";
 import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
 import { CARRY_WARN, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
+import { parseRef, toLines, urlFor } from "./src/bible.js";
 import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration, sessionForDate, timerMode } from "./src/training.js";
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
@@ -286,6 +287,43 @@ const weekLoaded = renderToString(tabRenders[3][1]).replace(/<!--.*?-->/g, "");
 t("last week's three carry forward",     weekLoaded.includes("LAST WEEK&#x27;S THREE") && weekLoaded.includes("Purifier"));
 const plansLoaded = renderToString(tabRenders[5][1]).replace(/<!--.*?-->/g, "");
 t("the vault offers its own backup",     plansLoaded.includes("Export everything to JSON"));
+
+/* -------- evening prayer is non-negotiable too -------- */
+
+const longNight = { date: NEW, type: "Bunkering", start: "20:00", hours: 7 };
+const nightItems = byId(dayItems(seaLeg, NEW, [longNight]));
+t("evening prayer is moved, not missed",  !nightItems.vespers.stood && nightItems.vespers.movedFor === "Bunkering");
+t("the whole Word thread is protected",   dayItems(seaLeg, NEW, [longNight])
+  .filter((i) => i.tag === "word").every((i) => !i.stood));
+
+/* -------- the form reference -------- */
+
+const bodyRef = renderToString(
+  <BodyTab C={TD} dark wide={false} session={byKey("hiit-tread-a")} heavy={false} autoHeavy={false}
+    onHeavy={noop} record={null} onComplete={noop} />).replace(/<!--.*?-->/g, "");
+t("a treadmill day still offers the figures", bodyRef.includes("Form reference"));
+t("the reference is closed until asked",  !bodyRef.includes('class="xf"'));
+
+/* -------- the reading's text -------- */
+
+t("the plan's books resolve",             parseRef("Psalm 23").book === "PSA"
+                                       && parseRef("Matthew 12").book === "MAT"
+                                       && parseRef("Mark 3").book === "MRK");
+t("anything else declines",               parseRef("Genesis 1") === null && parseRef("") === null);
+t("the URL is the free-use API",          urlFor(parseRef("Psalm 23")) === "https://bible.helloao.org/api/BSB/PSA/23.json");
+t("verses flatten, footnotes drop",       (() => {
+  const lines = toLines({ chapter: { content: [
+    { type: "heading", content: ["The LORD Is My Shepherd"] },
+    { type: "hebrew_subtitle", content: ["A Psalm of David."] },
+    { type: "verse", number: 1, content: [{ text: "The LORD is my shepherd;", poem: 1 }, { noteId: 50 }, { text: "I shall not want.", poem: 2 }] },
+    { type: "line_break" },
+  ] } });
+  return lines.length === 3
+      && lines[0].kind === "heading"
+      && lines[2].text === "The LORD is my shepherd; I shall not want."
+      && !JSON.stringify(lines).includes("noteId");
+})());
+t("a missing chapter yields nothing, quietly", toLines(null).length === 0 && toLines({}).length === 0);
 
 console.log(bad ? `\n${bad} FAILED` : "\nall assertions hold");
 process.exit(bad ? 1 : 0);

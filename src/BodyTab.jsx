@@ -11,7 +11,7 @@ import React, { useState } from "react";
 
 import { F } from "./theme.js";
 import Timer from "./Timer.jsx";
-import { ExerciseFigure, exerciseCue } from "./components/ExerciseFigure.jsx";
+import { EXERCISE_KEYS, ExerciseFigure, exerciseCue, exerciseLabel } from "./components/ExerciseFigure.jsx";
 import {
   COOLDOWN, RULES, buildIntervals, hasHeavyBlock, mainBlock, timerMode, warmupFor,
 } from "./training.js";
@@ -105,6 +105,9 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
   const [openWarm, setOpenWarm] = useState(false);
   const [openAfter, setOpenAfter] = useState(false);
   const [rules, setRules] = useState(false);
+  // Every figure, reachable on a day whose own session has none — a treadmill
+  // Monday is exactly when you are thinking about tomorrow's movements.
+  const [reference, setReference] = useState(null);
   const [shown, setShown] = useState(null); // only one figure open at a time
 
   const toggleFigure = (m) => {
@@ -180,9 +183,14 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
         </div>
       )}
 
-      <button onClick={() => setRules(!rules)} className="wb-t mt-3 text-left" style={{ fontSize: 11.5, color: C.dim2 }}>
-        {rules ? "Hide the standing rules" : "The standing rules"}
-      </button>
+      <div className="flex gap-4 mt-3">
+        <button onClick={() => setRules(!rules)} className="wb-t text-left" style={{ fontSize: 11.5, color: C.dim2 }}>
+          {rules ? "Hide the standing rules" : "The standing rules"}
+        </button>
+        <button onClick={() => setReference(EXERCISE_KEYS[0])} className="wb-t text-left" style={{ fontSize: 11.5, color: C.dim2 }}>
+          Form reference
+        </button>
+      </div>
       {rules && (
         <div className="mt-2 flex flex-col gap-2">
           {Object.entries(RULES).map(([k, v]) => (
@@ -244,8 +252,45 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
     </div>
   );
 
+  const referenceSheet = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-3"
+      style={{ background: dark ? "rgba(4,10,13,.72)" : "rgba(16,38,46,.42)" }}
+      onClick={() => setReference(null)}>
+      <div className="wb-t w-full max-w-md rounded-[22px] overflow-hidden"
+        style={{ background: C.card, border: `1px solid ${C.line2}`, boxShadow: C.shadow }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 pt-5 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+          <div style={eyebrow}>FORM REFERENCE</div>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em", color: C.text, marginTop: 4 }}>
+            {exerciseLabel(reference)}
+          </div>
+        </div>
+        <div className="px-4 py-4" style={{ background: C.panel }}>
+          <ExerciseFigure move={reference} colors={{ fig: C.text, line: C.dim, accent: C.amber }} />
+        </div>
+        <div className="px-5 py-4">
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: C.text2 }}>{exerciseCue(reference)}</div>
+        </div>
+        <div className="px-4 pb-4 flex flex-wrap gap-1.5">
+          {EXERCISE_KEYS.map((k) => (
+            <button key={k} onClick={() => { setReference(k); onSeen(k); }}
+              className="wb-t px-2.5 py-1.5 rounded-full" style={{
+                fontSize: 11, fontWeight: 500,
+                background: k === reference ? C.amber : "transparent",
+                color: k === reference ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim,
+                border: `1px solid ${k === reference ? C.amber : C.line2}`,
+              }}>{exerciseLabel(k)}</button>
+          ))}
+        </div>
+        <button onClick={() => setReference(null)} className="wb-t w-full py-3"
+          style={{ fontSize: 12.5, color: C.dim, borderTop: `1px solid ${C.line}` }}>Close</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className={wide ? "grid grid-cols-2 gap-4 items-start" : "flex flex-col gap-3"}>
+      {reference && referenceSheet()}
       <div className="flex flex-col gap-3">
         {header}
         {!rest && (

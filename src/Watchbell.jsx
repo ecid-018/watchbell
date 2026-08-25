@@ -32,6 +32,7 @@ import { readSession, sessionForDate, sessionsInWindow, sessionsDueInWindow, wri
 import { EVENT_TYPES, dayDoable, dayItems, dueSoon, eventOn, recoveryOn } from "./events.js";
 import { jobsInWindow, makeJob } from "./jobs.js";
 import { DEFAULT_RANKS, exportAll, loadStore, newId, saveStore } from "./store.js";
+import { TRANSLATION_NAME, countCached, fetchInto, parseRef, readCached, toLines } from "./bible.js";
 
 export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // `now` lives in state so an app left open on the home screen rolls over at
@@ -57,6 +58,11 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [weeks, setWeeks] = useState(() => loadStore("weeks"));
   const [ranks, setRanks] = useState(() => loadStore("ranks"));
   const [declaring, setDeclaring] = useState(false);
+  // The reading's own text, if it was carried aboard. Never fetched on render.
+  const [passage, setPassage] = useState(null);
+  const [aboard, setAboard] = useState(null);
+  const [loading, setLoading] = useState(null);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [exporting, setExporting] = useState(null);
 
   const wide = useLandscape();
@@ -193,6 +199,17 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     };
   }, [todayKey]);
 
+  // Only so the button can say why it will not work. Nothing acts on this.
+  useEffect(() => {
+    const mark = () => setOnline(navigator.onLine);
+    window.addEventListener("online", mark);
+    window.addEventListener("offline", mark);
+    return () => {
+      window.removeEventListener("online", mark);
+      window.removeEventListener("offline", mark);
+    };
+  }, []);
+
   // Paint the page behind the card so iOS rubber-band overscroll does not flash
   // white, and keep the installed app's status bar tint in step with the theme.
   useEffect(() => {
@@ -266,6 +283,56 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const clearEvent = (dk) => setEvents((all) => all.filter((e) => e.date !== dk));
 
   const due = useMemo(() => dueSoon(plans, now), [plans, todayKey]);
+
+  /* -------- the reading's text -------- */
+
+  // Every chapter the rest of this phase will ask for. A port stay is
+  // open-ended, so it carries six weeks and no more.
+  const bibleRefs = useMemo(() => {
+    const last = Math.min(lengthOf(phase), realDay + 44);
+    const out = [];
+    for (let d = realDay; d <= last; d++) {
+      const p = dayPlan(readingDayOf(phase, d));
+      for (const ref of [p.psalm, p.nt]) {
+        const parsed = parseRef(ref);
+        if (parsed) out.push(parsed);
+      }
+    }
+    return out;
+  }, [phase, realDay]);
+
+  const shownRefs = useMemo(
+    () => [parseRef(plan.psalm), parseRef(plan.nt)].filter(Boolean),
+    [plan.psalm, plan.nt],
+  );
+
+  // Cache-first and cache-only. A miss shows the reference and says so.
+  useEffect(() => {
+    let alive = true;
+    setPassage(null);
+    (async () => {
+      const loaded = [];
+      for (const ref of shownRefs) {
+        const payload = await readCached(ref);
+        loaded.push({ ref, lines: payload ? toLines(payload) : null });
+      }
+      if (alive) setPassage(loaded);
+    })();
+    return () => { alive = false; };
+  }, [shownRefs]);
+
+  useEffect(() => {
+    let alive = true;
+    countCached(bibleRefs).then((n) => alive && setAboard({ have: n, total: bibleRefs.length }));
+    return () => { alive = false; };
+  }, [bibleRefs, loading]);
+
+  const carryThePassage = async () => {
+    setLoading({ done: 0, total: bibleRefs.length });
+    const tally = await fetchInto(bibleRefs, (p) => setLoading(p));
+    setLoading(null);
+    setAboard({ have: tally.got + tally.already, total: tally.total });
+  };
 
   /* -------- pieces -------- */
 
@@ -656,6 +723,84 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
         )}
       </div>
       <div>
+        {aboard && (
+          <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.line2}` }}>
+            <div className="flex items-baseline justify-between">
+              <span style={{ ...eyebrow, color: aboard.have === aboard.total ? C.foam : C.dim2 }}>
+                {aboard.have === aboard.total ? "THE PASSAGE IS ABOARD" : "TEXT ABOARD"}
+              </span>
+              <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.dim }}>
+                {aboard.have} / {aboard.total}
+              </span>
+            </div>
+            {loading ? (
+              <>
+                <div className="rounded-full mt-2" style={{ height: 4, background: C.track }}>
+                  <div className="rounded-full" style={{
+                    height: 4, background: C.gold,
+                    width: `${loading.total ? (loading.done / loading.total) * 100 : 0}%`,
+                  }} />
+                </div>
+                <div style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 4, color: C.dim }}>
+                  carrying {loading.done} of {loading.total}
+                </div>
+              </>
+            ) : aboard.have < aboard.total ? (
+              <>
+                <button onClick={carryThePassage} disabled={online === false}
+                  className="wb-t w-full rounded-xl mt-2 py-2.5"
+                  style={{
+                    fontSize: 13, fontWeight: 600,
+                    background: online === false ? "transparent" : C.gold,
+                    color: online === false ? C.dim2 : dark ? "#0E1C22" : "#FFFFFF",
+                    border: `1px solid ${online === false ? C.line2 : C.gold}`,
+                  }}>
+                  {online === false ? "No link — try alongside" : "Carry the rest aboard"}
+                </button>
+                <div style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 6, color: C.dim }}>
+                  The one thing in this app that uses the network, and only on this tap.
+                  Do it alongside. About {Math.round(((aboard.total - aboard.have) * 8) / 100) / 10} MB
+                  of {TRANSLATION_NAME}, and then the link can go for the rest of the passage.
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 4, color: C.dim }}>
+                Every reading to the end of this phase is on the iPad. Nothing more to fetch.
+              </div>
+            )}
+          </div>
+        )}
+
+        {passage && passage.some((p) => p.lines) && (
+          <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+            {passage.map(({ ref, lines }) => (
+              <div key={ref.label} className="mb-3">
+                <div style={{ ...eyebrow, marginBottom: 4 }}>{ref.label.toUpperCase()}</div>
+                {lines ? lines.map((l, i) => (
+                  l.kind === "verse" ? (
+                    <p key={i} style={{ margin: "0 0 5px", fontFamily: F.serif, fontSize: 15, lineHeight: 1.6, color: C.text }}>
+                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.dim2, marginRight: 5, verticalAlign: "super" }}>{l.n}</span>
+                      {l.text}
+                    </p>
+                  ) : (
+                    <p key={i} style={{
+                      margin: l.kind === "heading" ? "10px 0 5px" : "0 0 6px",
+                      fontFamily: F.serif, fontSize: l.kind === "heading" ? 15 : 13,
+                      fontWeight: l.kind === "heading" ? 600 : 400,
+                      fontStyle: l.kind === "subtitle" ? "italic" : "normal",
+                      color: l.kind === "heading" ? C.gold : C.dim,
+                    }}>{l.text}</p>
+                  )
+                )) : (
+                  <div style={{ fontSize: 12, lineHeight: 1.45, color: C.dim }}>
+                    Not aboard. The reference stands; carry the text next time you have a link.
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={{ ...eyebrow, marginBottom: 6 }}>THE PASSAGE</div>
         {Array.from({ length: 8 }, (_, k) => readDay - 2 + k).filter((d) => d >= 1).map((d) => {
           const p = dayPlan(d);

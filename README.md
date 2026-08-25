@@ -181,6 +181,29 @@ both the 05:35 item and that day's entry on the plan, because it is one act. Day
 already read before the gate existed keep their tick: the rule applies to the act of
 ticking, not retroactively.
 
+### Carrying the text
+
+The reading plan needs no network — it is arithmetic. The *words* are another
+matter, and the Word tab will carry them.
+
+**"Carry the rest aboard" is the only thing in this app that touches the
+network, and it only runs on that tap.** It fetches every chapter the rest of
+the phase will ask for — about 0.6 MB for a 40-day passage — into the Cache API,
+one chapter at a time, and after that the reading is there with the link down.
+The button says "No link — try alongside" when the device knows it is offline.
+Nothing is ever fetched on render: a chapter that is not aboard shows its
+reference and says so.
+
+Text comes from the [Free Use Bible API](https://bible.helloao.org/docs/), which
+needs no key, sets no limits, and serves the Berean Standard Bible under terms
+that permit keeping a copy. That last part is why it is this API and not a
+better-known one: API.Bible requires cached text be refreshed every thirty days
+and the ESV API caps a cache at five hundred verses. A forty-day passage breaks
+both.
+
+Only the books the plan names resolve — Psalms, Matthew, Mark. Extending the
+plan means extending `BOOKS` in `src/bible.js`.
+
 ---
 
 ## The Body tab
@@ -237,7 +260,9 @@ quiet, the figure stays a tap away. Counts live in `watchbell:figures`.
 
 The treadmill days (Monday, Saturday) have no figures in their normal block, because
 there is nothing to demonstrate about a belt. The figures cluster on the bodyweight
-days, which is where form goes wrong.
+days, which is where form goes wrong. **Form reference** in the Body header opens all
+nine regardless of the day, which is what a treadmill Monday needs when you are
+thinking about tomorrow.
 
 To add one: draw it in `ExerciseFigure.jsx`, then add `figure: "its-key"` to the
 matching movement in the plan. `npm test` fails if a key does not resolve, or if the
@@ -254,8 +279,12 @@ the day bends rather than breaking.
 | | |
 |---|---|
 | **Suspended** | Trading, exercise, the evening block, where they fall inside the window |
-| **Protected** | Bible reading, both showers, lights out — moved clear of the window instead |
+| **Protected** | Bible reading, evening prayer, both showers, lights out — moved clear of the window instead |
 | **Untouched** | Rounds, daywork, the admin block. Ship's business *is* the day's work |
+
+The whole Word thread is protected, not just its morning half: a seven-hour
+bunkering that left evening prayer due at 21:30 and quietly missable would be
+the one shape of failure this app exists to refuse.
 
 A suspended item is `stood`, which is the same mechanism the Cape leg already
 uses: greyed with the reason, and excluded by `dayDoable`. That exclusion is the
@@ -365,6 +394,10 @@ Everything is in `localStorage` on the iPad. Nothing leaves the ship.
 | `watchbell:weeks` | One entry per week, keyed by its Monday |
 | `watchbell:ranks` | Who jobs can be assigned to |
 | `watchbell:schema` | The storage version migrations run against |
+
+The reading's text is the one thing not in `localStorage`: it lives in the Cache
+API under `watchbell-bible-v1`, because it is bulk and because that is what the
+Cache API is for. Clearing it is the only way it shrinks.
 | `watchbell:mode` | `"auto"` / `"light"` / `"dark"` |
 | `watchbell:voyageStart` | Pre-phases departure date. Still read on first launch after an update, and still written, so a rollback finds it |
 
@@ -411,6 +444,7 @@ src/
   phase.js                    routes, generated legs, the phase list
   voyage.js                   date arithmetic, and nothing else
   training.js                 reading the plan; the bout queue
+  bible.js                    the reading's text, cache-first and cache-only
   events.js                   ship's business, suspension, the graveyard rule
   jobs.js                     the job model and its carry arithmetic
   store.js                    the versioned stores, migration and export

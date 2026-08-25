@@ -22,24 +22,29 @@ Node 20.19+ or 22.12+ (built on 24.x).
 
 ## Deploying
 
-Build, then put `dist/` on any static host **over HTTPS**:
+Live at **https://ecid-018.github.io/watchbell/**.
+
+Pushing to `main` is the whole deploy. `.github/workflows/deploy.yml` builds on a
+runner and publishes `dist/` to GitHub Pages; nothing needs building locally.
 
 ```bash
-npm run build
+git push          # → https://ecid-018.github.io/watchbell/ in about 30 seconds
+gh run list       # watch it land
 ```
 
-Netlify Drop, Vercel, Cloudflare Pages and GitHub Pages all work — the app is a
-directory of static files with nothing behind it.
+Because this is a Pages **project site** it is served from the subpath
+`/watchbell/`, which three settings must agree on or the service worker registers
+with the wrong scope and offline launch fails: `base` in `vite.config.js`, and
+`start_url` and `scope` in the manifest block of the same file. All three are
+`/watchbell/`. Moving to a root domain means changing all three back to `/`.
 
 > **The one thing that will catch you out at sea.** A service worker only registers on
 > **HTTPS** or on **`localhost`**. Serving `dist/` from a laptop on the ship's LAN over
 > plain `http://192.168.x.x` will *not* register the worker, and the app will *not* work
-> offline — it will look fine until the link drops, then fail. Deploy it to a real HTTPS
-> URL once while the satellite is up.
+> offline — it will look fine until the link drops, then fail. Install from the real
+> HTTPS URL above once while the satellite is up.
 
-Deploying to a **subpath** (e.g. `example.com/watchbell/`) means changing three things
-together, or the worker registers with the wrong scope: `base` in `vite.config.js`, and
-`start_url` and `scope` in the manifest block of the same file.
+Any other static host works the same way — `npm run build`, upload `dist/`, over HTTPS.
 
 ---
 
@@ -59,7 +64,7 @@ footer clear the status bar and the home indicator.
 
 ### Updating a deployed copy
 
-The worker is `autoUpdate`: when a new build is deployed, the next launch **with a
+The worker is `autoUpdate`: once a push to `main` has deployed, the next launch **with a
 connection** picks it up and the one after that runs it. Nothing to tap. Your logged
 data is untouched by an update — it lives in `localStorage`, not in the cache.
 

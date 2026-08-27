@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, lazy, Suspense } from "react";
 
 /* ------------------------------------------------------------------
    WATCHBELL — daily discipline log for a passage
@@ -18,21 +18,25 @@ import {
   TAGS, currentItem, dayPlan, eveningFor,
   minutesOfDay, nextItem, pretty, windowEnd,
 } from "./schedule.js";
-import { K, readJSON, readLog, writeJSON } from "./storage.js";
+import { K, readJSON, readLog, writeJSON, getQuotaInfo } from "./storage.js";
 import { addDays, clockDate, dateKey, parseKey, prettyDate } from "./voyage.js";
 import { currentPhase, dayOf, endpointsOf, isComplete, legOf, legsOf, lengthOf, nameOf, readingDayOf } from "./phase.js";
 import { graceDays, onPlan, rollingSeven } from "./stats.js";
 import { useLandscape } from "./useLandscape.js";
-import WordTab from "./WordTab.jsx";
 import BodyTab from "./BodyTab.jsx";
 import JobsTab from "./JobsTab.jsx";
-import WeekTab, { weekKey } from "./WeekTab.jsx";
-import PlansTab from "./PlansTab.jsx";
 import { readSession, sessionForDate, sessionsInWindow, sessionsDueInWindow, writeSession } from "./training.js";
 import { EVENT_TYPES, dayDoable, dayItems, dueSoon, eventOn, recoveryOn } from "./events.js";
 import { jobsInWindow, makeJob } from "./jobs.js";
-import { DEFAULT_RANKS, exportAll, loadStore, newId, saveStore } from "./store.js";
+import { DEFAULT_RANKS, exportAll, importAll, loadStore, newId, saveStore } from "./store.js";
 import { allRefs, countCached, fetchInto, listBooks, parseRef } from "./bible.js";
+import { ADMIN, SLOTS } from "./data/admin-tasks.js";
+import { adminToday, dueTriggers, slotSummary, taskStatus } from "./admin.js";
+
+// Lazy-loaded tabs (code-split) — each needs a <Suspense> boundary above it.
+const WordTab = lazy(() => import("./WordTab.jsx"));
+const WeekTab = lazy(() => import("./WeekTab.jsx"));
+const PlansTab = lazy(() => import("./PlansTab.jsx"));
 
 export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // `now` lives in state so an app left open on the home screen rolls over at
@@ -66,6 +70,16 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [loading, setLoading] = useState(null);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [exporting, setExporting] = useState(null);
+  const [quota, setQuota] = useState(null);
+
+  // Admin tasks: last-done date and deferred-until date, per task key. Every
+  // other fact about a task — due, overdue, carried — is recomputed from
+  // these two dates and the calendar, never stored.
+  const [adminDone, setAdminDone] = useState(() => readJSON(K.adminCompletions, {}) || {});
+  const [adminDeferred, setAdminDeferred] = useState(() => readJSON(K.adminDeferrals, {}) || {});
+  const [openAdminSlot, setOpenAdminSlot] = useState(null); // "am" | "pm" | null
+  const [openAdminTask, setOpenAdminTask] = useState(null); // task key
+  const [vaultOffer, setVaultOffer] = useState(null); // { title } | null, after a defect/survey task
 
   const wide = useLandscape();
   const phase = currentPhase(phases);
@@ -161,12 +175,25 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const trainDue = useMemo(() => sessionsDueInWindow(now), [todayKey]);
   const jobFigure = useMemo(() => jobsInWindow(jobs, now), [jobs, todayKey]);
 
+  // Admin tasks are a calendar fact, not a leg-preview one: they run off
+  // today regardless of which leg is on screen.
+  const adminCtx = useMemo(
+    () => ({ today: now, todayKey, completions: adminDone, deferrals: adminDeferred, events }),
+    [now, todayKey, adminDone, adminDeferred, events],
+  );
+  const amSummary = useMemo(() => slotSummary(ADMIN, "am", adminCtx, SLOTS.am.minutes), [adminCtx]);
+  const pmSummary = useMemo(() => slotSummary(ADMIN, "pm", adminCtx, SLOTS.pm.minutes), [adminCtx]);
+  const triggerTasks = useMemo(() => dueTriggers(ADMIN, adminCtx), [adminCtx]);
+  const adminFigure = useMemo(() => adminToday(ADMIN, adminCtx), [adminCtx]);
+
   /* -------- persistence -------- */
 
   useEffect(() => writeJSON(K.mode, mode), [mode]);
   useEffect(() => writeJSON(K.read, read), [read]);
   useEffect(() => writeJSON(K.reflect, reflect), [reflect]);
   useEffect(() => writeJSON(K.figures, seenFigures), [seenFigures]);
+  useEffect(() => writeJSON(K.adminCompletions, adminDone), [adminDone]);
+  useEffect(() => writeJSON(K.adminDeferrals, adminDeferred), [adminDeferred]);
   useEffect(() => saveStore("jobs", jobs), [jobs]);
   useEffect(() => saveStore("plans", plans), [plans]);
   useEffect(() => saveStore("events", events), [events]);
@@ -174,6 +201,24 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => saveStore("ranks", ranks), [ranks]);
   useEffect(() => saveStore("marks", marks), [marks]);
   useEffect(() => writeJSON(K.log(todayKey), done), [todayKey, done]);
+
+  // A slot counts as done for the day the moment everything due in it is —
+  // vacuously, if nothing is due — folded into the same `done` object the
+  // rest of the day's scoring already reads, so nothing downstream needs to
+  // know admin tasks exist. The day's carried critical tasks ride along in
+  // the same record purely so the Week tab can read history off the log
+  // instead of re-guessing it from today's completions.
+  useEffect(() => {
+    const carried = ADMIN.filter((t) => t.critical)
+      .filter((t) => taskStatus(t, adminCtx).carried)
+      .map((t) => t.key);
+    setDone((d) => {
+      const prevCarried = d.adminCarriedCritical || [];
+      const sameCarried = prevCarried.length === carried.length && prevCarried.every((k) => carried.includes(k));
+      if (d["admin-am"] === amSummary.allDone && d["admin-pm"] === pmSummary.allDone && sameCarried) return d;
+      return { ...d, "admin-am": amSummary.allDone, "admin-pm": pmSummary.allDone, adminCarriedCritical: carried };
+    });
+  }, [amSummary.allDone, pmSummary.allDone, adminCtx]);
 
   // One second, because the clock shows seconds. The heavy figures are memoised
   // on the date key rather than on `now`, so a tick is a repaint and not a
@@ -242,12 +287,16 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     if (d === todayReadDay) setDone((x) => ({ ...x, word: false }));
   };
 
+  /** An admin slot's tick is derived from its tasks, never set directly. */
+  const openAdmin = (id) => { setTab("log"); setOpenAdminSlot(id === "admin-am" ? "am" : "pm"); };
+
   const toggle = (item) => {
     if (item.stood) return;
     // The reading stays reachable while previewing another leg: the sheet writes
     // against the reading day on screen, and only closes the 05:35 item when
     // that day is today's. Everything else stays read-only in a preview.
     if (item.id === "word") return openReflection(readDay);
+    if (item.id === "admin-am" || item.id === "admin-pm") return openAdmin(item.id);
     if (previewing) return;
     setDone((d) => ({ ...d, [item.id]: !d[item.id] }));
   };
@@ -256,6 +305,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const toggleNow = () => {
     if (!nowItem || nowItem.stood) return;
     if (nowItem.id === "word") return openReflection(todayReadDay);
+    if (nowItem.id === "admin-am" || nowItem.id === "admin-pm") return openAdmin(nowItem.id);
     setDone((d) => ({ ...d, [nowItem.id]: !d[nowItem.id] }));
   };
 
@@ -275,6 +325,41 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const spawnJob = (plan) => {
     addJob({ title: plan.title, detail: plan.source ? `From the vault · ${plan.source}` : "From the vault", assignee: ranks[0] || "Self", priority: "normal", from: plan.id });
     setPlan(plan.id, { status: "active" });
+    setTab("jobs");
+  };
+
+  /* -------- admin tasks -------- */
+
+  // Ticking is a toggle, same as every other checkbox in the day: unticking
+  // clears the completion outright, which is fine — the whole point of a
+  // cadence task is that its cover is one date, not a history to preserve.
+  const tickAdminTask = (t) => {
+    const wasDone = t.doneToday;
+    setAdminDone((m) => {
+      if (wasDone) { const n = { ...m }; delete n[t.key]; return n; }
+      return { ...m, [t.key]: todayKey };
+    });
+    if (wasDone) return;
+    // A completion clears any deferral — the task is caught up, so the next
+    // occurrence starts with its one day of grace intact again.
+    setAdminDeferred((m) => {
+      if (!(t.key in m)) return m;
+      const n = { ...m };
+      delete n[t.key];
+      return n;
+    });
+    if (t.vaultPrompt) setVaultOffer({ title: `${t.title} — ${prettyDate(now)}` });
+  };
+
+  const deferAdminTask = (t) => {
+    setAdminDeferred((m) => ({ ...m, [t.key]: dateKey(addDays(now, 1)) }));
+    setOpenAdminTask(null);
+  };
+
+  // Hands the task to the engine room without touching its own cadence — a
+  // job spawned from it is separate work, not a record of completion.
+  const spawnJobFromTask = (t) => {
+    addJob({ title: t.title, detail: t.detail, assignee: ranks[0] || "Self", priority: t.critical ? "urgent" : "normal" });
     setTab("jobs");
   };
 
@@ -319,6 +404,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   }, [bibleRefs, loading]);
 
   useEffect(() => { listBooks().then(setBooks); }, []);
+
+  useEffect(() => { getQuotaInfo().then(setQuota); }, []);
 
   const carry = async (refs) => {
     setLoading({ done: 0, total: refs.length });
@@ -588,6 +675,131 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     );
   };
 
+  /** One admin task's row — same expand-in-place pattern as an exercise
+      figure: tap the label to open detail and note, one row open at a time. */
+  const adminTaskRow = (t) => {
+    const isOpen = openAdminTask === t.key;
+    const warn = t.critical && t.carried;
+    return (
+      <div key={t.key}>
+        <div className="flex items-center gap-2.5 py-1.5">
+          <button onClick={() => tickAdminTask(t)} className="wb-t shrink-0" aria-label={t.title}>
+            {tick(t.doneToday, 18)}
+          </button>
+          <button onClick={() => setOpenAdminTask(isOpen ? null : t.key)} className="wb-t flex-1 text-left">
+            <span style={{
+              fontSize: 13.5, color: t.doneToday ? C.dim : C.text,
+              textDecoration: t.doneToday ? "line-through" : "none", textDecorationColor: C.dim2,
+            }}>{t.title}</span>
+            {(t.counter || warn) && (
+              <span className="block" style={{ fontFamily: F.mono, fontSize: 10, marginTop: 1, color: C.oxide }}>
+                {[t.counter, warn ? "carried — compliance" : null].filter(Boolean).join(" · ")}
+              </span>
+            )}
+          </button>
+          <span style={{ fontFamily: F.mono, fontSize: 10, color: C.dim2 }}>{t.est}m</span>
+        </div>
+        {isOpen && (
+          <div className="wb-t rounded-xl mb-1.5 px-3 py-2.5" style={{ marginLeft: 28, background: C.panel, border: `1px solid ${C.line2}` }}>
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, color: C.text2 }}>{t.detail}</div>
+            {t.note && <div style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 4, color: C.dim }}>{t.note}</div>}
+            <div className="flex gap-2 mt-2.5">
+              <button onClick={() => spawnJobFromTask(t)} className="wb-t flex-1 rounded-lg py-1.5"
+                style={{ fontSize: 11.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+                Send to the job list
+              </button>
+              {t.canDefer && (
+                <button onClick={() => deferAdminTask(t)} className="wb-t flex-1 rounded-lg py-1.5"
+                  style={{ fontSize: 11.5, fontWeight: 600, color: C.dim, border: `1px solid ${C.line2}` }}>
+                  Defer to tomorrow
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /** A slot's row in the day's list: header ticks itself off automatically
+      once everything due inside it is done, and expands to the tasks. */
+  const adminSlotRow = (item, slot, summary) => {
+    const isOpen = openAdminSlot === slot;
+    const accent = C[TAGS[item.tag].k];
+    return (
+      <div key={item.id}>
+        <button onClick={() => setOpenAdminSlot(isOpen ? null : slot)}
+          className="wb-t w-full flex items-center gap-3 py-2.5 px-2 rounded-xl text-left"
+          style={{ background: isOpen || summary.allDone ? C.sub : "transparent", opacity: item.stood ? 0.5 : 1 }}>
+          <span style={{ fontFamily: F.mono, fontSize: 12, width: 38, color: C.text2 }}>{pretty(item.t)}</span>
+          <span className="self-stretch rounded-full" style={{ width: 3, background: accent, opacity: summary.allDone ? 0.35 : 0.9 }} />
+          <span className="flex-1">
+            <span style={{
+              fontSize: wide ? 15 : 14, color: summary.allDone ? C.dim : C.text,
+              textDecoration: summary.allDone ? "line-through" : "none", textDecorationColor: C.dim2,
+            }}>{item.label}</span>
+            <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: summary.overWindow ? C.oxide : C.dim2 }}>
+              {summary.total} task{summary.total === 1 ? "" : "s"} · {summary.minutes} min
+              {summary.overWindow ? " · over the window" : ""}
+            </span>
+            {item.stood && (
+              <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: C.oxide }}>
+                suspended — {item.why}
+              </span>
+            )}
+          </span>
+          {tick(summary.allDone)}
+        </button>
+        {isOpen && (
+          <div className="px-2 pb-3">
+            {summary.due.length === 0 && (
+              <div style={{ fontSize: 12.5, color: C.dim, padding: "4px 0" }}>Nothing due in this slot today.</div>
+            )}
+            {summary.due.map(adminTaskRow)}
+            {summary.comingUp.length > 0 && (
+              <div style={{ marginTop: summary.due.length ? 8 : 0 }}>
+                <div style={{ fontFamily: F.mono, fontSize: 9, letterSpacing: ".1em", color: C.dim2 }}>COMING UP</div>
+                {summary.comingUp.map((t) => (
+                  <div key={t.key} className="flex items-baseline gap-2 py-1">
+                    <span className="flex-1" style={{ fontSize: 12.5, color: C.dim }}>{t.title}</span>
+                    <span style={{ fontFamily: F.mono, fontSize: 10, color: C.amber }}>{t.est}m</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /** Ship's business, when it lands: the checklist it triggers jumps the
+      queue, ahead of both slots and whatever the schedule says the hour is. */
+  const adminTriggerBanner = () => triggerTasks.length > 0 && (
+    <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.oxide}` }}>
+      <div style={{ ...eyebrow, color: C.oxide }}>SHIP'S BUSINESS — {triggerTasks[0].trigger.toUpperCase()}</div>
+      {triggerTasks.map(adminTaskRow)}
+    </div>
+  );
+
+  const vaultOfferBanner = () => vaultOffer && (
+    <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.foam}66` }}>
+      <div style={{ ...eyebrow, color: C.foam }}>ADD TO THE VAULT?</div>
+      <div style={{ fontSize: 13, lineHeight: 1.4, marginTop: 3, color: C.text }}>{vaultOffer.title}</div>
+      <div className="flex gap-2 mt-2.5">
+        <button onClick={() => { addPlan({ title: vaultOffer.title, source: "Own" }); setVaultOffer(null); setTab("plans"); }}
+          className="wb-t flex-1 rounded-lg py-2"
+          style={{ fontSize: 12.5, fontWeight: 600, background: C.foam, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.foam}` }}>
+          Add
+        </button>
+        <button onClick={() => setVaultOffer(null)} className="wb-t flex-1 rounded-lg py-2"
+          style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
+          Skip
+        </button>
+      </div>
+    </div>
+  );
+
   const dueBanner = () => due.length > 0 && (
     <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.line2}` }}>
       <div style={{ ...eyebrow, color: due.some((p) => p.overdue) ? C.oxide : C.amber }}>
@@ -606,6 +818,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const logTab = () => (
     <div className="space-y-0.5">
+      {adminTriggerBanner()}
       {dueBanner()}
       {recovery && (
         <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.amber}66` }}>
@@ -617,7 +830,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
         </div>
       )}
       {eventPanel()}
+      {vaultOfferBanner()}
       {items.map((i) => {
+        if (i.id === "admin-am") return adminSlotRow(i, "am", amSummary);
+        if (i.id === "admin-pm") return adminSlotRow(i, "pm", pmSummary);
         // While previewing another leg the log is read-only: ticking a day
         // that has not happened yet would pre-fill its record.
         const isDone = previewing ? false : !!done[i.id];
@@ -751,7 +967,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const scoreTab = () => (
     <div>
-      <div className={wide ? "grid grid-cols-5 gap-3 mb-3" : ""}>
+      <div className={wide ? "grid grid-cols-6 gap-3 mb-3" : ""}>
         <div className="wb-t rounded-2xl p-5 mb-3 text-center" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
           <div style={eyebrow}>ROLLING SEVEN DAYS</div>
           <div style={{ fontSize: 60, fontWeight: 700, letterSpacing: "-.04em", lineHeight: 1.02, marginTop: 4, color: C.foam }}>
@@ -765,6 +981,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             ["On plan", plan7 ? `${plan7.hit}/${plan7.total}` : "—", "sessions to rule", C.foam],
             ["Trained", `${trained}/${trainDue}`, "sessions this week", trained ? C.foam : C.dim],
             ["Jobs", `${jobFigure.done}/${jobFigure.total || 0}`, `${jobFigure.carried} carried`, C.amber],
+            ["Admin", `${adminFigure.done}/${adminFigure.total || 0}`, `${adminFigure.carried} carried`, adminFigure.carried ? C.oxide : C.amber],
           ].map(([t, v, s, col]) => (
             <div key={t} className="wb-t rounded-2xl p-4" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
               <div style={{ ...eyebrow, letterSpacing: ".1em" }}>{t.toUpperCase()}</div>
@@ -903,17 +1120,22 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           <JobsTab C={C} dark={dark} wide={wide} jobs={jobs} ranks={ranks} todayKey={todayKey}
             onAdd={addJob} onSet={setJob} />
         )}
-        {tab === "word" && wordTab()}
-        {tab === "week" && (
-          <WeekTab C={C} dark={dark} wide={wide} weeks={weeks} today={now}
-            onSet={(k, v) => setWeeks((all) => ({ ...all, [k]: v }))}
-            figures={{ habit: r7 ? r7.pct : null, trained, due: trainDue, jobs: jobFigure, plan: plan7 }} />
-        )}
-        {tab === "plans" && (
-          <PlansTab C={C} dark={dark} wide={wide} plans={plans} today={now}
-            onAdd={addPlan} onSet={setPlan} onSpawn={spawnJob}
-            onExport={() => setExporting(JSON.stringify(exportAll(), null, 2))} />
-        )}
+        <Suspense fallback={<div className="py-8 text-center" style={{ fontSize: 13, color: C.dim }}>Loading…</div>}>
+          {tab === "word" && wordTab()}
+          {tab === "week" && (
+            <WeekTab C={C} dark={dark} wide={wide} weeks={weeks} today={now}
+              onSet={(k, v) => setWeeks((all) => ({ ...all, [k]: v }))}
+              figures={{ habit: r7 ? r7.pct : null, trained, due: trainDue, jobs: jobFigure, plan: plan7 }} />
+          )}
+          {tab === "plans" && (
+            <PlansTab C={C} dark={dark} wide={wide} plans={plans} today={now}
+              onAdd={addPlan} onSet={setPlan} onSpawn={spawnJob}
+              onExport={() => JSON.stringify(exportAll(), null, 2)}
+              onExportFallback={setExporting}
+              onImport={importAll}
+              quota={quota} />
+          )}
+        </Suspense>
         {tab === "score" && scoreTab()}
       </div>
     </>

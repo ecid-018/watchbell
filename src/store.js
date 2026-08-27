@@ -8,7 +8,7 @@
    shape and writes a new key alongside it.
 ------------------------------------------------------------------ */
 
-import { K, readJSON, writeJSON } from "./storage.js";
+import { K, readJSON, writeJSON, writeSnapshot } from "./storage.js";
 
 export const SCHEMA = 3;
 
@@ -31,6 +31,7 @@ const STORES = {
  */
 export function migrateStores() {
   const at = readJSON(K.schema, 1);
+  const migrating = at < SCHEMA;
 
   // 1 → 2: the stores behind Jobs, Week, Plans and ship events. Creating them
   // empty is the whole migration; the daily log and phases are untouched.
@@ -43,7 +44,12 @@ export function migrateStores() {
   // 2 → 3: highlighted verses. Same shape of migration: create it empty.
   if (at < 3 && readJSON(K.marks, null) === null) writeJSON(K.marks, {});
 
-  if (at !== SCHEMA) writeJSON(K.schema, SCHEMA);
+  if (migrating) {
+    writeJSON(K.schema, SCHEMA);
+    // A snapshot of the freshly migrated data, so a schema that turns out to
+    // be wrong has something to roll back to besides the pre-migration state.
+    writeSnapshot(SCHEMA, exportAll());
+  }
   return SCHEMA;
 }
 
@@ -64,18 +70,36 @@ export const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${(seq++).
  */
 export function exportAll() {
   const out = { app: "watchbell", schema: SCHEMA, exported: new Date().toISOString(), data: {} };
-  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "figures", "mode"]) {
+  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "figures", "mode", "adminCompletions", "adminDeferrals"]) {
     const v = readJSON(K[name], null);
     if (v !== null) out.data[K[name]] = v;
   }
   // The daily records are one key per day, so they are gathered by prefix.
+  // Read through readJSON, not a raw parse — the value on disk is wrapped in
+  // a checksum envelope, and exporting that envelope instead of the record
+  // itself would double-wrap it on the next import.
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
       if (key && (key.startsWith("watchbell:log:") || key.startsWith("watchbell:train:"))) {
-        out.data[key] = JSON.parse(window.localStorage.getItem(key));
+        const v = readJSON(key, null);
+        if (v !== null) out.data[key] = v;
       }
     }
   } catch (e) { /* storage refused — the rest of the export still stands */ }
   return out;
+}
+
+/**
+ * The reverse of exportAll: write every key from a backup straight back to
+ * storage, then bring the result up to the current schema. Additive, like
+ * every migration — an older export just backfills whatever it predates.
+ */
+export function importAll(backup) {
+  if (!backup || typeof backup !== "object" || backup.app !== "watchbell" ||
+    !backup.data || typeof backup.data !== "object") {
+    throw new Error("not a Watchbell backup");
+  }
+  for (const [key, value] of Object.entries(backup.data)) writeJSON(key, value);
+  migrateStores();
 }

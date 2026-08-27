@@ -15,10 +15,12 @@ import { dateKey } from "./voyage.js";
 export const SOURCES = ["Office", "Class", "Own", "Superintendent"];
 export const STATUSES = [["planned", "Planned"], ["active", "In progress"], ["done", "Done"]];
 
-export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport }) {
+export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportFallback, onImport, quota }) {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(null);
   const [draft, setDraft] = useState({ title: "", notes: "", target: "", source: "" });
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
 
   const eyebrow = { fontFamily: F.mono, fontSize: 9, letterSpacing: ".12em", color: C.dim2 };
   const field = {
@@ -48,6 +50,42 @@ export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, on
       border: `1px solid ${on ? (tone || C.amber) : C.line2}`,
     }}>{label}</button>
   );
+
+  /** Share sheet first — the one path that reliably saves a file from an iOS
+      home-screen app. Anything that can't share falls back to the on-screen
+      copy/download panel, which works everywhere. */
+  const handleExport = async () => {
+    const json = onExport();
+    const blob = new Blob([json], { type: "application/json" });
+    const file = new File([blob], `watchbell-${dateKey(new Date())}.json`, { type: "application/json" });
+    try {
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Watchbell Backup" });
+        return;
+      }
+    } catch (e) {
+      if (e.name === "AbortError") return; // user cancelled the share sheet
+    }
+    onExportFallback(json);
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const data = JSON.parse(evt.target.result);
+        setImportError("");
+        await onImport(data);
+        setImporting(false);
+        window.location.reload();
+      } catch (err) {
+        setImportError("Invalid backup file: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   return (
     <div className={wide ? "grid grid-cols-2 gap-4 items-start" : ""}>
@@ -89,13 +127,37 @@ export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, on
               style={{ fontSize: 14, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
               Add a plan
             </button>
-            <button onClick={onExport} className="wb-t w-full rounded-xl py-2.5 mb-3"
-              style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
+            <button onClick={handleExport} className="wb-t w-full rounded-xl py-2.5 mb-2"
+              style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.line2}` }}>
               Export everything to JSON
             </button>
+            {importing ? (
+              <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+                <div style={eyebrow}>IMPORT BACKUP</div>
+                <input type="file" accept=".json" onChange={handleImport}
+                  className="wb-t w-full rounded-xl mt-2 px-3" style={{ ...field, fontFamily: F.mono }} />
+                {importError && <div style={{ color: C.oxide, marginTop: 8, fontSize: 13 }}>{importError}</div>}
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setImporting(false)} className="wb-t flex-1 rounded-xl py-2.5"
+                    style={{ fontSize: 13, fontWeight: 600, color: C.dim, border: `1px solid ${C.line2}` }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setImporting(true)} className="wb-t w-full rounded-xl py-2.5 mb-3"
+                style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
+                Import backup from file
+              </button>
+            )}
             <div style={{ fontSize: 11.5, lineHeight: 1.5, padding: "0 4px", color: C.dim2 }}>
               The vault lives on this iPad only. Export before a reinstall — deleting the
               home-screen icon takes it with it.
+              {quota && quota.quota > 0 && (
+                <span style={{ display: "block", marginTop: 4, color: quota.pct > 80 ? C.oxide : C.dim2 }}>
+                  Storage: {quota.pct}% used ({Math.round(quota.usage / 1024)} KB of {Math.round(quota.quota / 1024)} KB)
+                </span>
+              )}
             </div>
           </>
         )}

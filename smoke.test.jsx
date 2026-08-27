@@ -18,6 +18,8 @@ import WordTab, { REFLECT_MIN } from "./src/WordTab.jsx";
 import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration, sessionForDate, timerMode } from "./src/training.js";
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
+import { adminToday, criticalCarriedInWeek, slotSummary, taskStatus } from "./src/admin.js";
+import { addDays, dateKey } from "./src/voyage.js";
 
 const noop = () => {};
 // renderToString separates interpolated text nodes with comment markers; strip
@@ -250,6 +252,100 @@ t("dropped is archived, not deleted",    (() => {
 t("jobs are counted, never averaged in", (() => {
   const w = jobsInWindow([{ ...j0, status: "done", doneOn: NEW }, j1], new Date(2026, 7, 26));
   return w.done === 1 && typeof w.total === "number" && !("pct" in w);
+})());
+
+/* -------- admin cadence -------- */
+
+const WD = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const ADAY = new Date(2026, 7, 26);
+const ADAY_KEY = dateKey(ADAY);
+const ctx = (over) => ({ today: ADAY, todayKey: ADAY_KEY, completions: {}, deferrals: {}, events: [], ...over });
+
+t("daily is always due", taskStatus({ key: "d", cadence: "daily" }, ctx()).due);
+
+t("3day is not due at two days", !taskStatus(
+  { key: "t3", cadence: "3day" }, ctx({ completions: { t3: dateKey(addDays(ADAY, -2)) } }),
+).due);
+t("3day is due at three days, and again at four", (() => {
+  const at3 = taskStatus({ key: "t3", cadence: "3day" }, ctx({ completions: { t3: dateKey(addDays(ADAY, -3)) } }));
+  const at4 = taskStatus({ key: "t3", cadence: "3day" }, ctx({ completions: { t3: dateKey(addDays(ADAY, -4)) } }));
+  return at3.due && !at3.overdue && at4.due && at4.overdue && at4.counter === "day 5";
+})());
+
+t("weekly is due on its day, not yet carried, and carried once missed", (() => {
+  const onDay = taskStatus({ key: "w", cadence: "weekly", day: WD[ADAY.getDay()] }, ctx());
+  const missed = taskStatus({ key: "w", cadence: "weekly", day: WD[(ADAY.getDay() + 6) % 7] }, ctx());
+  return onDay.due && !onDay.carried && missed.due && missed.carried;
+})());
+t("a weekly task done since its last occurrence is not due again", !taskStatus(
+  // Scheduled two days ago; done yesterday — inside the current cycle.
+  { key: "w", cadence: "weekly", day: WD[(ADAY.getDay() + 5) % 7] },
+  ctx({ completions: { w: dateKey(addDays(ADAY, -1)) } }),
+).due);
+t("a weekly task never done carries from its last occurrence, whatever today's weekday is",
+  taskStatus({ key: "w", cadence: "weekly", day: WD[(ADAY.getDay() + 1) % 7] }, ctx()).due);
+
+t("monthly surfaces as coming up before it is due, then falls due", (() => {
+  const soon = taskStatus({ key: "m", cadence: "monthly" }, ctx({ completions: { m: dateKey(addDays(ADAY, -28)) } }));
+  const due = taskStatus({ key: "m", cadence: "monthly" }, ctx({ completions: { m: dateKey(addDays(ADAY, -30)) } }));
+  return soon.comingUp && !soon.due && due.due && !due.comingUp;
+})());
+
+t("trigger is due only with a matching event today, and ignores other events", (() => {
+  const none = taskStatus({ key: "arr", cadence: "trigger", trigger: "Arrival" }, ctx());
+  const wrong = taskStatus({ key: "arr", cadence: "trigger", trigger: "Arrival" },
+    ctx({ events: [{ date: ADAY_KEY, type: "Bunkering" }] }));
+  const right = taskStatus({ key: "arr", cadence: "trigger", trigger: "Arrival" },
+    ctx({ events: [{ date: ADAY_KEY, type: "Arrival" }] }));
+  return !none.due && !wrong.due && right.due;
+})());
+
+t("a deferred task drops out today and returns tomorrow", (() => {
+  const tomorrow = dateKey(addDays(ADAY, 1));
+  const today = taskStatus({ key: "d", cadence: "daily" }, ctx({ deferrals: { d: tomorrow } }));
+  const next = taskStatus({ key: "d", cadence: "daily" },
+    ctx({ today: addDays(ADAY, 1), todayKey: tomorrow, deferrals: { d: tomorrow } }));
+  return !today.due && next.due;
+})());
+
+t("a critical task cannot be deferred twice, a routine one can", (() => {
+  // Deferred until today — the one day of grace has already been spent, so
+  // it is due and carried again, not still mid-defer.
+  const critical = taskStatus({ key: "c", cadence: "3day", critical: true },
+    ctx({ completions: { c: dateKey(addDays(ADAY, -3)) }, deferrals: { c: ADAY_KEY } }));
+  const routine = taskStatus({ key: "r", cadence: "3day", critical: false },
+    ctx({ completions: { r: dateKey(addDays(ADAY, -3)) }, deferrals: { r: ADAY_KEY } }));
+  return !critical.canDefer && critical.carried && routine.canDefer;
+})());
+
+t("a slot totals its due tasks' minutes and flags going over the window", (() => {
+  const tasks = [
+    { key: "a", slot: "am", cadence: "daily", est: 20 },
+    { key: "b", slot: "am", cadence: "daily", est: 20 },
+    { key: "c", slot: "pm", cadence: "daily", est: 15 },
+  ];
+  const am = slotSummary(tasks, "am", ctx(), 30);
+  return am.total === 2 && am.minutes === 40 && am.overWindow;
+})());
+t("a slot with nothing due counts as done", slotSummary([], "am", ctx(), 30).allDone);
+
+t("today's admin figure counts due tasks, not a percentage", (() => {
+  const tasks = [{ key: "a", slot: "am", cadence: "daily", critical: false }];
+  const fig = adminToday(tasks, ctx({ completions: { a: ADAY_KEY } }));
+  return fig.done === 1 && fig.total === 1 && !("pct" in fig);
+})());
+t("a carried critical task counts toward the admin figure's carried total", (() => {
+  const tasks = [{ key: "c", cadence: "3day", critical: true }];
+  const fig = adminToday(tasks, ctx({ completions: { c: dateKey(addDays(ADAY, -4)) } }));
+  return fig.total === 1 && fig.done === 0 && fig.carried === 1;
+})());
+
+t("a week's carried critical tasks are read off each day's own log", (() => {
+  const tasks = [{ key: "orb", title: "ORB entries", critical: true }];
+  const logs = { [dateKey(addDays(ADAY, -2))]: { adminCarriedCritical: ["orb"] } };
+  const readLog = (dk) => logs[dk] || {};
+  const carried = criticalCarriedInWeek(tasks, addDays(ADAY, -6), ADAY, readLog);
+  return carried.length === 1 && carried[0].title === "ORB entries" && carried[0].date === dateKey(addDays(ADAY, -2));
 })());
 
 /* -------- plans -------- */

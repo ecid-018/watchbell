@@ -4,6 +4,10 @@ import { registerSW } from "virtual:pwa-register";
 
 import App from "./App.jsx";
 import "./index.css";
+import { replayWAL } from "./storage.js";
+
+// Replay any half-written WAL entries before the app reads storage
+replayWAL();
 
 // Precache the whole build and take over as soon as a new one lands. There is
 // nothing to prompt about — no unsaved server state, and a satellite window may

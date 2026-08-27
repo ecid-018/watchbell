@@ -11,8 +11,12 @@ import React, { useState } from "react";
    Every week is kept. You can walk back through them.
 ------------------------------------------------------------------ */
 
+import { useMemo } from "react";
 import { F } from "./theme.js";
 import { addDays, dateKey, mondayOf, parseKey, prettyDate } from "./voyage.js";
+import { readLog } from "./storage.js";
+import { ADMIN } from "./data/admin-tasks.js";
+import { criticalCarriedInWeek } from "./admin.js";
 
 const blank = () => ({ review: "", plan: "", priorities: [{ text: "", done: false }, { text: "", done: false }, { text: "", done: false }] });
 
@@ -26,6 +30,10 @@ export default function WeekTab({ C, dark, wide, weeks, today, onSet, figures })
   const prevKey = dateKey(addDays(monday, -7));
   const prev = weeks[prevKey];
   const current = offset === 0;
+  const carried = useMemo(
+    () => criticalCarriedInWeek(ADMIN, monday, addDays(monday, 6), readLog),
+    [key],
+  );
 
   const eyebrow = { fontFamily: F.mono, fontSize: 9, letterSpacing: ".12em", color: C.dim2 };
   const area = {
@@ -67,6 +75,17 @@ export default function WeekTab({ C, dark, wide, weeks, today, onSet, figures })
       <div className={wide ? "grid grid-cols-2 gap-4 items-start" : ""}>
         <div>
           <div style={{ ...eyebrow, marginBottom: 6 }}>LOOK BACK</div>
+          {carried.length > 0 && (
+            <div className="wb-t rounded-xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.oxide}66` }}>
+              <div style={{ ...eyebrow, color: C.oxide }}>CRITICAL TASKS CARRIED THIS WEEK</div>
+              {carried.map((c) => (
+                <div key={c.key} className="flex items-baseline gap-2 py-1">
+                  <span className="flex-1" style={{ fontSize: 13, color: C.text }}>{c.title}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.oxide }}>{c.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             {stat("Habits", figures.habit === null ? "—" : `${figures.habit}%`, "rolling seven", C.foam)}
             {stat("Sessions", `${figures.trained}/${figures.due}`, "trained", C.foam)}

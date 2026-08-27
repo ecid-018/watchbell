@@ -10,9 +10,9 @@ import React, { useEffect, useState } from "react";
 
 import Setup from "./Setup.jsx";
 import Watchbell from "./Watchbell.jsx";
-import { K, readJSON, writeJSON } from "./storage.js";
+import { K, readJSON, writeJSON, writeAutoBackup } from "./storage.js";
 import { appendPhase, arrivalUTCOf, currentPhase, endpointsOf, migrate, replaceCurrent } from "./phase.js";
-import { migrateStores } from "./store.js";
+import { exportAll, migrateStores } from "./store.js";
 
 // Storage is brought up to the current schema before anything reads it.
 migrateStores();
@@ -21,6 +21,11 @@ export default function App() {
   const [phases, setPhases] = useState(() => migrate(readJSON(K.phases, null), readJSON(K.start, null)));
   // null | { mode: "edit" | "next", kind }
   const [editing, setEditing] = useState(null);
+
+  // One backup a day, taken once storage is known to be up to schema.
+  useEffect(() => {
+    writeAutoBackup(exportAll());
+  }, []);
 
   const phase = currentPhase(phases);
 

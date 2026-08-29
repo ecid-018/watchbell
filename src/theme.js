@@ -15,14 +15,14 @@ export const THEME = {
     bg: "#08151A", card: "#0E1C22", panel: "#0B1A20", sub: "#12262C",
     line: "#1B333B", line2: "#24404A", text: "#E9F0EF", text2: "#9DB2B8",
     dim: "#5E7C87", dim2: "#48646E", amber: "#E9B255", foam: "#6FB9A6",
-    oxide: "#D0674A", gold: "#C7A86B", ring: "#2C4A54", track: "#1B333B",
+    oxide: "#D0674A", gold: "#C7A86B", fuel: "#7C9CC4", ring: "#2C4A54", track: "#1B333B",
     shadow: "0 24px 60px rgba(0,0,0,.55)",
   },
   light: {
     bg: "#DDE5E8", card: "#F7FAFA", panel: "#EDF2F4", sub: "#FFFFFF",
     line: "#DCE5E8", line2: "#C7D6DB", text: "#10262E", text2: "#3E5B66",
     dim: "#6C848D", dim2: "#8AA0A8", amber: "#96650F", foam: "#1C7A64",
-    oxide: "#A2422A", gold: "#7E6428", ring: "#BDCDD3", track: "#D8E2E5",
+    oxide: "#A2422A", gold: "#7E6428", fuel: "#375C87", ring: "#BDCDD3", track: "#D8E2E5",
     shadow: "0 16px 40px rgba(16,38,46,.14)",
   },
 };

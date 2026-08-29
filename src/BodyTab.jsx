@@ -101,7 +101,7 @@ const Fold = ({ C, title, count, open, onToggle, children }) => (
   </div>
 );
 
-export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record, onComplete, autoHeavy, recovery = null, seen = {}, onSeen = () => {} }) {
+export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record, onComplete, autoHeavy, recovery = null, seen = {}, onSeen = () => {}, onFlagPoor = () => {} }) {
   const [openWarm, setOpenWarm] = useState(false);
   const [openAfter, setOpenAfter] = useState(false);
   const [rules, setRules] = useState(false);
@@ -190,6 +190,11 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
         <button onClick={() => setReference(EXERCISE_KEYS[0])} className="wb-t text-left" style={{ fontSize: 11.5, color: C.dim2 }}>
           Form reference
         </button>
+        {session.kind === "HIIT" && record?.completed && (
+          <button onClick={onFlagPoor} className="wb-t text-left" style={{ fontSize: 11.5, color: record?.poor ? C.oxide : C.dim2 }}>
+            {record?.poor ? "Flagged as a poor session" : "Flag as a poor session"}
+          </button>
+        )}
       </div>
       {rules && (
         <div className="mt-2 flex flex-col gap-2">

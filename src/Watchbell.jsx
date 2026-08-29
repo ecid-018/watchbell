@@ -32,6 +32,11 @@ import { DEFAULT_RANKS, exportAll, importAll, loadStore, newId, saveStore } from
 import { allRefs, countCached, fetchInto, listBooks, parseRef } from "./bible.js";
 import { ADMIN, SLOTS } from "./data/admin-tasks.js";
 import { adminToday, dueTriggers, slotSummary, taskStatus } from "./admin.js";
+import {
+  applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
+  isWindowSuspended, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
+  PROLONGED_CAP_HOURS,
+} from "./fasting.js";
 
 // Lazy-loaded tabs (code-split) — each needs a <Suspense> boundary above it.
 const WordTab = lazy(() => import("./WordTab.jsx"));
@@ -81,6 +86,20 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [openAdminTask, setOpenAdminTask] = useState(null); // task key
   const [vaultOffer, setVaultOffer] = useState(null); // { title } | null, after a defect/survey task
 
+  // Fasting: the ramp's anchor date and any manual stage pin, plus the
+  // fasted-training setting. Everything else about today's window — open
+  // time, fasting or open, adherence — is recomputed fresh, never stored.
+  const [fasting, setFasting] = useState(() => readJSON(K.fasting, null) ?? {
+    // Backdated two weeks: stage 1 (the 12-hour week) is skipped on first
+    // run, landing directly on stage 2's 14-hour window. The ramp still
+    // advances to stage 3 on its own after two more weeks, same as if
+    // stage 1 had actually been lived through.
+    startDate: dateKey(addDays(parseKey(todayKey), -14)), stagePin: null, breakFastOnHiit: false, hiitPromptShown: false,
+  });
+  const [prolongedFast, setProlongedFast] = useState(() => readJSON(K.prolongedFast, null));
+  const [prolongedFastLog, setProlongedFastLog] = useState(() => readJSON(K.prolongedFastLog, []) || []);
+  const [startingFast, setStartingFast] = useState(false); // showing the checklist
+
   const wide = useLandscape();
   const phase = currentPhase(phases);
   // A port stay mints its synthetic leg on the fly, so without memoising this
@@ -112,9 +131,18 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     : todayKey;
   const event = eventOn(events, shownKeyEarly);
   const recovery = recoveryOn(events, shownKeyEarly);
+
+  // Fasting is a calendar fact like the admin tasks, not a leg-preview one:
+  // the window is today's regardless of which leg's schedule is on screen.
+  const isHiitToday = sessionForDate(now).kind === "HIIT";
+  const fastingStage = currentStage(fasting, now);
+  const fastingWindow = windowForDay(fasting, fastingStage, isHiitToday);
+  const prolongedActive = !!prolongedFast?.active;
+  const windowSuspended = isWindowSuspended(events, todayKey);
+
   const items = useMemo(
-    () => dayItems(leg, shownKeyEarly, events),
-    [leg, shownKeyEarly, events],
+    () => applyFastingWindow(dayItems(leg, shownKeyEarly, events), fastingWindow, prolongedActive),
+    [leg, shownKeyEarly, events, fastingStage, isHiitToday, fasting.breakFastOnHiit, prolongedActive],
   );
 
   // The session is the weekday's, so previewing a leg previews that leg's
@@ -149,10 +177,17 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     if (!previewing) setDone((d) => ({ ...d, train: on }));
   };
 
+  // Whether a HIIT session felt hard fasted — the only input the break-fast
+  // nudge reads. Not a rating, not shown anywhere as a score.
+  const flagPoorSession = () => putSession({ poor: !dayRec?.poor });
+
   // The highlight is always the live day's, never the previewed leg's: it answers
   // "what should I be doing now", which a look-ahead cannot change.
   const liveLeg = legs[autoLegIdx];
-  const liveItems = useMemo(() => dayItems(liveLeg, todayKey, events), [liveLeg, todayKey, events]);
+  const liveItems = useMemo(
+    () => applyFastingWindow(dayItems(liveLeg, todayKey, events), fastingWindow, prolongedActive),
+    [liveLeg, todayKey, events, fastingStage, isHiitToday, fasting.breakFastOnHiit, prolongedActive],
+  );
   const nowItem = currentItem(liveItems, minutesOfDay(now));
   const nowEnd = windowEnd(liveItems, nowItem);
   const upNext = nextItem(liveItems, nowItem);
@@ -186,6 +221,18 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const triggerTasks = useMemo(() => dueTriggers(ADMIN, adminCtx), [adminCtx]);
   const adminFigure = useMemo(() => adminToday(ADMIN, adminCtx), [adminCtx]);
 
+  const prolongedDates = useMemo(
+    () => prolongedFastLog.map((f) => f.date).concat(prolongedFast?.date ? [prolongedFast.date] : []),
+    [prolongedFastLog, prolongedFast],
+  );
+  const windowFigure = useMemo(
+    () => windowAdherence(phases, now, live, events, 7, prolongedDates),
+    [phases, todayKey, live, events, prolongedDates],
+  );
+  // Reads storage directly (like sessionsInWindow above), so trainLog acts as
+  // the recompute trigger rather than an input the function actually reads.
+  const hiitPrompt = useMemo(() => hiitPromptEligible(fasting, now), [fasting, todayKey, trainLog]);
+
   /* -------- persistence -------- */
 
   useEffect(() => writeJSON(K.mode, mode), [mode]);
@@ -194,6 +241,9 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => writeJSON(K.figures, seenFigures), [seenFigures]);
   useEffect(() => writeJSON(K.adminCompletions, adminDone), [adminDone]);
   useEffect(() => writeJSON(K.adminDeferrals, adminDeferred), [adminDeferred]);
+  useEffect(() => writeJSON(K.fasting, fasting), [fasting]);
+  useEffect(() => writeJSON(K.prolongedFast, prolongedFast), [prolongedFast]);
+  useEffect(() => writeJSON(K.prolongedFastLog, prolongedFastLog), [prolongedFastLog]);
   useEffect(() => saveStore("jobs", jobs), [jobs]);
   useEffect(() => saveStore("plans", plans), [plans]);
   useEffect(() => saveStore("events", events), [events]);
@@ -297,6 +347,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     // that day is today's. Everything else stays read-only in a preview.
     if (item.id === "word") return openReflection(readDay);
     if (item.id === "admin-am" || item.id === "admin-pm") return openAdmin(item.id);
+    if (item.id === "fuel-water") return previewing ? undefined : addWater();
     if (previewing) return;
     setDone((d) => ({ ...d, [item.id]: !d[item.id] }));
   };
@@ -306,6 +357,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     if (!nowItem || nowItem.stood) return;
     if (nowItem.id === "word") return openReflection(todayReadDay);
     if (nowItem.id === "admin-am" || nowItem.id === "admin-pm") return openAdmin(nowItem.id);
+    if (nowItem.id === "fuel-water") return addWater();
     setDone((d) => ({ ...d, [nowItem.id]: !d[nowItem.id] }));
   };
 
@@ -368,6 +420,38 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     setDeclaring(false);
   };
   const clearEvent = (dk) => setEvents((all) => all.filter((e) => e.date !== dk));
+
+  /* -------- fasting -------- */
+
+  const WATER_TARGET = 8;
+
+  // A tap adds a glass — no undo, no cap. The tick just watches the count.
+  const addWater = () => setDone((d) => {
+    const count = (d.waterCount || 0) + 1;
+    return { ...d, waterCount: count, "fuel-water": count >= WATER_TARGET };
+  });
+
+  const holdStage = () => setFasting((f) => ({ ...f, stagePin: fastingStage }));
+  const stepBackStage = () => setFasting((f) => ({ ...f, stagePin: Math.max(1, fastingStage - 1) }));
+  const resumeAuto = () => setFasting((f) => ({ ...f, stagePin: null }));
+  const setBreakFastOnHiit = (on) => setFasting((f) => ({ ...f, breakFastOnHiit: on, hiitPromptShown: true }));
+  const dismissHiitPrompt = () => setFasting((f) => ({ ...f, hiitPromptShown: true }));
+
+  const prolongedGate = useMemo(() => canStartProlongedFast(todayKey, phases, events), [todayKey, phases, events]);
+
+  const beginProlongedFast = () => {
+    setProlongedFast({ active: true, date: todayKey, startedAt: now.toISOString() });
+    setStartingFast(false);
+  };
+
+  // One tap, no confirmation, no judgement — ending early is not a failure
+  // and is never recorded as one.
+  const endProlongedFast = () => {
+    if (!prolongedFast) return;
+    const hours = prolongedElapsedHours(prolongedFast.startedAt, now);
+    setProlongedFastLog((log) => [...log, { date: prolongedFast.date, hours: Math.round(hours * 10) / 10 }]);
+    setProlongedFast(null);
+  };
 
   const due = useMemo(() => dueSoon(plans, now), [plans, todayKey]);
 
@@ -800,6 +884,115 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     </div>
   );
 
+  /** The water counter's row: a tap adds a glass, no undo, no cap past the
+      target. The tick just reflects whether the target has been reached. */
+  const fuelWaterRow = (item) => {
+    const count = done.waterCount || 0;
+    const on = count >= WATER_TARGET;
+    const accent = C[TAGS[item.tag].k];
+    return (
+      <button key={item.id} onClick={() => !previewing && !item.stood && addWater()}
+        className="wb-t w-full flex items-center gap-3 py-2.5 px-2 rounded-xl text-left"
+        style={{ background: on ? C.sub : "transparent", opacity: item.stood || previewing ? 0.5 : 1 }}>
+        <span style={{ fontFamily: F.mono, fontSize: 12, width: 38, color: C.text2 }}>{pretty(item.t)}</span>
+        <span className="self-stretch rounded-full" style={{ width: 3, background: accent, opacity: on ? 0.35 : 0.9 }} />
+        <span className="flex-1">
+          <span style={{ fontSize: wide ? 15 : 14, color: on ? C.dim : C.text }}>{item.label}</span>
+          <span className="block" style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 2, color: item.stood ? C.oxide : on ? C.foam : C.dim2 }}>
+            {item.stood ? `suspended — ${item.why}` : `${count}/${WATER_TARGET} glasses — tap to add one`}
+          </span>
+        </span>
+        {tick(on)}
+      </button>
+    );
+  };
+
+  /** The single most useful thing on the day's screen: fasting, open, ship's
+      business, or a prolonged fast running instead of the ordinary cycle. */
+  const windowBand = () => {
+    if (prolongedActive) {
+      const hrs = prolongedElapsedHours(prolongedFast.startedAt, now);
+      return (
+        <div className="wb-t rounded-2xl overflow-hidden mb-3" style={{ background: C.sub, border: `1px solid ${C.fuel}` }}>
+          <div className="flex items-center justify-between px-3 pt-2.5">
+            <span style={{ ...eyebrow, color: C.fuel }}>PROLONGED FAST</span>
+            <span style={eyebrow}>{hrs >= PROLONGED_CAP_HOURS ? "CAP REACHED" : `CAP ${PROLONGED_CAP_HOURS} H`}</span>
+          </div>
+          <div className="px-3 pb-3 pt-1">
+            <div style={{ fontSize: wide ? 30 : 26, fontWeight: 700, letterSpacing: "-.03em", color: C.text }}>
+              {hrs.toFixed(1)} h elapsed
+            </div>
+            <button onClick={endProlongedFast} className="wb-t w-full rounded-xl mt-3 py-3"
+              style={{ fontSize: 14, fontWeight: 600, background: C.fuel, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.fuel}` }}>
+              End fast
+            </button>
+          </div>
+        </div>
+      );
+    }
+    const state = windowState(now, fastingWindow, windowSuspended);
+    const accent = state.phase === "suspended" ? C.dim : state.phase === "open" ? C.foam : C.fuel;
+    return (
+      <div className="wb-t rounded-2xl overflow-hidden mb-3" style={{ background: C.sub, border: `1px solid ${accent}66` }}>
+        <div className="px-3 pt-2.5">
+          <span style={{ ...eyebrow, color: accent }}>{state.label.toUpperCase()}</span>
+        </div>
+        <div className="px-3 pb-3 pt-1">
+          <div style={{ fontSize: wide ? 21 : 18, fontWeight: 600, letterSpacing: "-.01em", color: C.text }}>
+            {state.phase === "suspended" ? state.detail : `${state.label} — ${state.detail}`}
+          </div>
+          {state.phase !== "suspended" && (
+            <div style={{ fontFamily: F.mono, fontSize: 10.5, marginTop: 3, color: C.dim }}>
+              stage {fastingStage} of 3{fasting.stagePin ? " · held" : ""}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  /** Deliberately the only path in: a checklist, and one explicit tap past
+      it. Nothing about ending a fast goes through anything like this. */
+  const prolongedChecklist = () => startingFast && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-3"
+      style={{ background: dark ? "rgba(4,10,13,.72)" : "rgba(16,38,46,.42)" }}
+      onClick={() => setStartingFast(false)}>
+      <div className="wb-t w-full max-w-md rounded-[22px] overflow-hidden"
+        style={{ background: C.card, border: `1px solid ${C.line2}`, boxShadow: C.shadow }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 pt-5 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+          <div style={{ ...eyebrow, color: C.fuel }}>BEFORE YOU START</div>
+          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-.02em", color: C.text, marginTop: 4 }}>
+            24-hour fast
+          </div>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-3">
+          {[
+            "No training, no trading, no port operations today.",
+            "Electrolytes with water throughout, sodium included.",
+            "Stop immediately on dizziness, confusion or an odd heart rate.",
+            "No engine room work aloft or in confined spaces.",
+          ].map((line, i) => (
+            <div key={i} className="flex items-start gap-2.5">
+              <span className="shrink-0 rounded-full" style={{ width: 6, height: 6, marginTop: 6, background: C.fuel }} />
+              <span style={{ fontSize: 13.5, lineHeight: 1.5, color: C.text2 }}>{line}</span>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 pb-5 flex gap-2">
+          <button onClick={() => setStartingFast(false)} className="wb-t flex-1 rounded-xl py-2.5"
+            style={{ fontSize: 13, color: C.dim, border: `1px solid ${C.line2}` }}>
+            Not today
+          </button>
+          <button onClick={beginProlongedFast} className="wb-t flex-1 rounded-xl py-2.5"
+            style={{ fontSize: 13, fontWeight: 600, background: C.fuel, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.fuel}` }}>
+            Understood — begin
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const dueBanner = () => due.length > 0 && (
     <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.panel, border: `1px solid ${C.line2}` }}>
       <div style={{ ...eyebrow, color: due.some((p) => p.overdue) ? C.oxide : C.amber }}>
@@ -818,6 +1011,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const logTab = () => (
     <div className="space-y-0.5">
+      {prolongedChecklist()}
+      {windowBand()}
       {adminTriggerBanner()}
       {dueBanner()}
       {recovery && (
@@ -834,6 +1029,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       {items.map((i) => {
         if (i.id === "admin-am") return adminSlotRow(i, "am", amSummary);
         if (i.id === "admin-pm") return adminSlotRow(i, "pm", pmSummary);
+        if (i.id === "fuel-water") return fuelWaterRow(i);
         // While previewing another leg the log is read-only: ticking a day
         // that has not happened yet would pre-fill its record.
         const isDone = previewing ? false : !!done[i.id];
@@ -967,7 +1163,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const scoreTab = () => (
     <div>
-      <div className={wide ? "grid grid-cols-6 gap-3 mb-3" : ""}>
+      <div className={wide ? "grid grid-cols-7 gap-3 mb-3" : ""}>
         <div className="wb-t rounded-2xl p-5 mb-3 text-center" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
           <div style={eyebrow}>ROLLING SEVEN DAYS</div>
           <div style={{ fontSize: 60, fontWeight: 700, letterSpacing: "-.04em", lineHeight: 1.02, marginTop: 4, color: C.foam }}>
@@ -982,6 +1178,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             ["Trained", `${trained}/${trainDue}`, "sessions this week", trained ? C.foam : C.dim],
             ["Jobs", `${jobFigure.done}/${jobFigure.total || 0}`, `${jobFigure.carried} carried`, C.amber],
             ["Admin", `${adminFigure.done}/${adminFigure.total || 0}`, `${adminFigure.carried} carried`, adminFigure.carried ? C.oxide : C.amber],
+            ["Window", windowFigure ? `${windowFigure.hit}/${windowFigure.total}` : "—", "kept this week", C.fuel],
           ].map(([t, v, s, col]) => (
             <div key={t} className="wb-t rounded-2xl p-4" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
               <div style={{ ...eyebrow, letterSpacing: ".1em" }}>{t.toUpperCase()}</div>
@@ -1053,6 +1250,96 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
         </div>
       </div>
 
+      <div className={wide ? "grid grid-cols-2 gap-3 items-start" : ""} style={{ marginTop: 12 }}>
+        <div className="wb-t rounded-2xl p-4" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+          <div style={{ ...eyebrow, marginBottom: 6 }}>FASTING RAMP</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>
+            Stage {fastingStage} of 3 — window {pretty(fastingWindow.open)}–{pretty(fastingWindow.close)}
+          </div>
+          <div style={{ fontSize: 11.5, color: C.dim2, marginTop: 2 }}>
+            {fasting.stagePin ? "Held manually" : `Started ${prettyDate(parseKey(fasting.startDate))}`}
+          </div>
+          <div className="flex gap-2 mt-3">
+            {fasting.stagePin ? (
+              <>
+                {fastingStage > 1 && (
+                  <button onClick={stepBackStage} className="wb-t flex-1 rounded-xl py-2"
+                    style={{ fontSize: 12.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+                    Step back one
+                  </button>
+                )}
+                <button onClick={resumeAuto} className="wb-t flex-1 rounded-xl py-2"
+                  style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
+                  Resume the ramp
+                </button>
+              </>
+            ) : (
+              <button onClick={holdStage} className="wb-t flex-1 rounded-xl py-2"
+                style={{ fontSize: 12.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+                Hold at this stage
+              </button>
+            )}
+          </div>
+
+          <div style={{ ...eyebrow, marginTop: 16, marginBottom: 4 }}>FASTED TRAINING</div>
+          <button onClick={() => setBreakFastOnHiit(!fasting.breakFastOnHiit)}
+            className="wb-t w-full flex items-center justify-between rounded-xl px-3 py-2.5"
+            style={{ border: `1px solid ${C.line2}`, background: fasting.breakFastOnHiit ? C.panel : "transparent" }}>
+            <span style={{ fontSize: 13, color: C.text2 }}>Break fast after training on HIIT days</span>
+            <span className="shrink-0 rounded-full" style={{
+              width: 34, height: 20, background: fasting.breakFastOnHiit ? C.fuel : C.track, position: "relative",
+            }}>
+              <span className="absolute rounded-full" style={{
+                width: 16, height: 16, top: 2, left: fasting.breakFastOnHiit ? 16 : 2,
+                background: C.sub, transition: "left .15s ease",
+              }} />
+            </span>
+          </button>
+          {hiitPrompt && (
+            <div className="wb-t rounded-xl mt-2 p-3" style={{ background: C.panel, border: `1px solid ${C.fuel}66` }}>
+              <div style={{ fontSize: 12.5, lineHeight: 1.45, color: C.text2 }}>
+                A HIIT session or two has felt hard fasted lately. Break the fast after training on
+                those days?
+              </div>
+              <div className="flex gap-2 mt-2.5">
+                <button onClick={() => setBreakFastOnHiit(true)} className="wb-t flex-1 rounded-lg py-2"
+                  style={{ fontSize: 12, fontWeight: 600, background: C.fuel, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.fuel}` }}>
+                  Turn it on
+                </button>
+                <button onClick={dismissHiitPrompt} className="wb-t flex-1 rounded-lg py-2"
+                  style={{ fontSize: 12, color: C.dim, border: `1px solid ${C.line2}` }}>
+                  Not now
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="wb-t rounded-2xl p-4 mt-3" style={{ background: C.sub, border: `1px solid ${C.line2}`, marginTop: wide ? 0 : undefined }}>
+          <div style={{ ...eyebrow, marginBottom: 6 }}>PROLONGED FAST</div>
+          {prolongedActive ? (
+            <div style={{ fontSize: 12.5, color: C.dim }}>Running — see the Day tab.</div>
+          ) : prolongedGate.ok ? (
+            <button onClick={() => setStartingFast(true)} className="wb-t w-full rounded-xl py-2.5"
+              style={{ fontSize: 13, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+              Start a prolonged fast
+            </button>
+          ) : (
+            <div style={{ fontSize: 12.5, color: C.dim }}>{prolongedGate.reason}</div>
+          )}
+          {prolongedFastLog.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              {prolongedFastLog.slice().reverse().map((f, i) => (
+                <div key={i} className="flex items-baseline gap-2 py-1" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                  <span className="flex-1" style={{ fontSize: 13, color: C.text2 }}>{f.date}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.dim }}>{f.hours} h</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div style={{ fontSize: 12, lineHeight: 1.45, marginTop: 12, padding: "0 4px", color: C.dim }}>
         A missed day costs a grace day, not the record. Sunday closes the week with the journal review.
       </div>
@@ -1112,6 +1399,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             C={C} dark={dark} wide={wide}
             session={session} heavy={heavy} autoHeavy={autoHeavy && dayRec?.heavy === undefined}
             onHeavy={setHeavy} record={dayRec} onComplete={completeSession} recovery={recovery}
+            onFlagPoor={flagPoorSession}
             seen={seenFigures}
             onSeen={(key) => setSeenFigures((m) => ({ ...m, [key]: (m[key] || 0) + 1 }))}
           />

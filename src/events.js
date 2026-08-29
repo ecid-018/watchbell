@@ -20,7 +20,7 @@ import { sessionForDate } from "./training.js";
 export const EVENT_TYPES = ["Arrival", "Departure", "Bunkering", "Drill", "Survey", "Other"];
 
 /** What ship's business displaces. */
-const SUSPEND = new Set(["trade", "train", "evening", "admin-am", "admin-pm"]);
+const SUSPEND = new Set(["trade", "train", "evening", "admin-am", "admin-pm", "fuel-open", "fuel-close"]);
 
 /**
  * What it does not get to displace — moved clear instead.

@@ -45,13 +45,22 @@ export const BASE = [
   { id: "admin", t: "1500", label: "Admin block", tag: "duty", until: "2026-08-27" },
   { id: "admin-am", t: "0800", label: "Morning admin", tag: "duty", since: "2026-08-27" },
   { id: "admin-pm", t: "1600", label: "Afternoon admin", tag: "duty", since: "2026-08-27" },
+  // fuel-open's t is a placeholder — the fasting window's open time depends on
+  // the ramp stage and the HIIT-day override, so fasting.js retimes this item
+  // (and re-sorts) after itemsForLeg has read the template.
+  { id: "fuel-open", t: "1130", label: "Open the window — lunch", tag: "fuel", since: "2026-08-29" },
+  { id: "fuel-water", t: "1200", label: "Water target", tag: "fuel", since: "2026-08-29" },
   { id: "trade", t: "", label: "Trading session", tag: "desk" },
+  { id: "fuel-close", t: "1900", label: "Close the window — dinner done", tag: "fuel", since: "2026-08-29" },
+  { id: "fuel-protein", t: "1905", label: "Protein at both meals", tag: "fuel", since: "2026-08-29" },
+  { id: "fuel-veg", t: "1910", label: "Vegetables at both meals", tag: "fuel", since: "2026-08-29" },
   { id: "round-pm", t: "2000", label: "Night round", tag: "duty" },
   { id: "evening", t: "2030", label: "Evening block", tag: "reset", since: "2026-08-25" },
   { id: "shower-pm", t: "2100", label: "Shower", tag: "reset", since: "2026-08-25" },
   { id: "cabin", t: "2115", label: "Cabin reset", tag: "reset", until: "2026-08-25" },
   { id: "vespers", t: "2130", label: "Evening prayer, phone down", tag: "word", until: "2026-08-25" },
   { id: "vespers", t: "2130", label: "Cabin reset and evening prayer", tag: "word", since: "2026-08-25" },
+  { id: "fuel-no-late", t: "2200", label: "No late merienda", tag: "fuel", since: "2026-08-29" },
   { id: "sleep", t: "2215", label: "Lights out", tag: "reset" },
 ];
 
@@ -81,6 +90,7 @@ export const TAGS = {
   body: { k: "foam", n: "Body" },
   desk: { k: "amber", n: "Desk" },
   reset: { k: "dim", n: "Reset" },
+  fuel: { k: "fuel", n: "Fuel" },
 };
 
 /**

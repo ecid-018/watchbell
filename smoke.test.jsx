@@ -20,6 +20,10 @@ import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/Exer
 import { LEARNED_AT } from "./src/BodyTab.jsx";
 import { adminToday, criticalCarriedInWeek, slotSummary, taskStatus } from "./src/admin.js";
 import { addDays, dateKey } from "./src/voyage.js";
+import {
+  applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
+  isWindowSuspended, naturalStage, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
+} from "./src/fasting.js";
 
 const noop = () => {};
 // renderToString separates interpolated text nodes with comment markers; strip
@@ -346,6 +350,132 @@ t("a week's carried critical tasks are read off each day's own log", (() => {
   const readLog = (dk) => logs[dk] || {};
   const carried = criticalCarriedInWeek(tasks, addDays(ADAY, -6), ADAY, readLog);
   return carried.length === 1 && carried[0].title === "ORB entries" && carried[0].date === dateKey(addDays(ADAY, -2));
+})());
+
+/* -------- fasting -------- */
+
+const FADAY = new Date(2026, 7, 26);
+const FADAY_KEY = dateKey(FADAY);
+const nextSunday = (from) => addDays(from, (7 - from.getDay()) % 7);
+
+t("the ramp advances on the calendar: weeks 1-2, 3-4, then 16:8", (() => {
+  const start = dateKey(FADAY);
+  return naturalStage(start, FADAY) === 1
+    && naturalStage(start, addDays(FADAY, 13)) === 1
+    && naturalStage(start, addDays(FADAY, 14)) === 2
+    && naturalStage(start, addDays(FADAY, 27)) === 2
+    && naturalStage(start, addDays(FADAY, 28)) === 3;
+})());
+
+t("a pin overrides the calendar and never advances on its own", (() => {
+  const fasting = { startDate: dateKey(addDays(FADAY, -30)), stagePin: 1 };
+  return currentStage(fasting, FADAY) === 1;
+})());
+t("no pin follows the calendar", currentStage({ startDate: dateKey(FADAY), stagePin: null }, addDays(FADAY, 14)) === 2);
+
+t("the HIIT override only moves a later stage's open time earlier", (() => {
+  const on = { breakFastOnHiit: true };
+  const off = { breakFastOnHiit: false };
+  const stage3Hiit = windowForDay(on, 3, true);
+  const stage3Rest = windowForDay(on, 3, false);
+  const stage1Hiit = windowForDay(on, 1, true);
+  const stage3Off = windowForDay(off, 3, true);
+  return stage3Hiit.open === "0700" && stage3Rest.open === "1130"
+    && stage1Hiit.open === "0700" // already 07:00 at stage 1 — a no-op, not a conflict
+    && stage3Off.open === "1130" // the setting has to be on
+    && stage3Hiit.close === "1900" && stage3Rest.close === "1900"; // close never moves
+})());
+
+t("the window items retime to today's window and the list re-sorts around them", (() => {
+  const items = [
+    { id: "wake", t: "0530" },
+    { id: "fuel-open", t: "1130" },
+    { id: "work", t: "0800" },
+    { id: "fuel-close", t: "1900" },
+  ];
+  const out = applyFastingWindow(items, { open: "0700", close: "1900" });
+  return out[0].id === "wake" && out[1].id === "fuel-open" && out[1].t === "0700" && out[2].id === "work";
+})());
+
+t("a prolonged fast stands the whole Fuel thread down rather than racking up misses", (() => {
+  const items = [
+    { id: "wake", tag: "reset", t: "0530" },
+    { id: "fuel-open", tag: "fuel", t: "1130" },
+    { id: "fuel-protein", tag: "fuel", t: "1905" },
+  ];
+  const out = applyFastingWindow(items, { open: "1130", close: "1900" }, true);
+  const wake = out.find((i) => i.id === "wake");
+  const open = out.find((i) => i.id === "fuel-open");
+  const protein = out.find((i) => i.id === "fuel-protein");
+  return !wake.stood && open.stood && protein.stood && open.why === "prolonged fast";
+})());
+
+t("any Ship Event suspends the window for the day, not just an overlapping one",
+  isWindowSuspended([{ date: FADAY_KEY, type: "Bunkering", start: "03:00", hours: 2 }], FADAY_KEY)
+  && !isWindowSuspended([], FADAY_KEY));
+
+t("the window state reads exactly as the feature was specified", (() => {
+  const window = { open: "1130", close: "1900" };
+  // 01:20 is 6h20m past the previous day's 19:00 close.
+  const fasting = windowState(new Date(2026, 7, 26, 1, 20), window, false);
+  // 16:45 is 2h15m short of today's 19:00 close.
+  const open = windowState(new Date(2026, 7, 26, 16, 45), window, false);
+  return `${fasting.label} — ${fasting.detail}` === "Fasting — 6 h 20 m elapsed"
+    && `${open.label} — ${open.detail}` === "Window open — closes in 2 h 15 m";
+})());
+t("a suspended day never claims a fasting or open state", windowState(new Date(2026, 7, 26, 12, 0), { open: "1130", close: "1900" }, true).phase === "suspended");
+
+// A voyage that certainly covers "now" and the recent past, built the same
+// relative-to-today way as the fixtures at the top of this file — a
+// hardcoded date here would quietly stop covering "now" months from now.
+const fastingPhase = [{ kind: "voyage", start: day(400), from: "A", to: "B", days: 800, utc0: 0, utc1: 0, readOffset: 1 }];
+const today = new Date();
+const thisSunday = nextSunday(today);
+const thisSundayKey = dateKey(thisSunday);
+
+t("window adherence counts a day only when both ends were ticked, and skips a suspended day", (() => {
+  const day1 = dateKey(today), day0 = dateKey(addDays(today, -1));
+  const live = { [day1]: { "fuel-open": true, "fuel-close": true } };
+  const events = [{ date: day0, type: "Arrival", start: "06:00", hours: 4 }];
+  const fig = windowAdherence(fastingPhase, today, live, events, 2);
+  return fig && fig.total === 1 && fig.hit === 1; // yesterday excluded (event), today hit
+})());
+t("a prolonged-fast day is excluded from window adherence too", (() => {
+  const day0 = dateKey(addDays(today, -1));
+  const fig = windowAdherence(fastingPhase, today, {}, [], 2, [day0]);
+  return fig && fig.total === 1; // only today counted, day0 excluded as a prolonged-fast date
+})());
+
+t("a prolonged fast is Sunday-only", (() => {
+  const notSunday = addDays(thisSunday, 1);
+  return !canStartProlongedFast(dateKey(notSunday), fastingPhase, []).ok
+    && canStartProlongedFast(thisSundayKey, fastingPhase, []).ok;
+})());
+t("a prolonged fast is blocked by ship's business today or yesterday", (() => {
+  const eventToday = [{ date: thisSundayKey, type: "Arrival", start: "06:00", hours: 2 }];
+  const eventYesterday = [{ date: dateKey(addDays(thisSunday, -1)), type: "Arrival", start: "06:00", hours: 2 }];
+  return !canStartProlongedFast(thisSundayKey, fastingPhase, eventToday).ok
+    && !canStartProlongedFast(thisSundayKey, fastingPhase, eventYesterday).ok;
+})());
+t("a prolonged fast is blocked on a recovery day", (() => {
+  // An event the night before that runs past midnight into Sunday morning.
+  const overnight = [{ date: dateKey(addDays(thisSunday, -1)), type: "Bunkering", start: "22:00", hours: 8 }];
+  return !canStartProlongedFast(thisSundayKey, fastingPhase, overnight).ok;
+})());
+
+t("elapsed hours on a prolonged fast are hard-capped at 24", (() => {
+  const startedAt = new Date(2026, 7, 26, 0, 0).toISOString();
+  const at30h = new Date(2026, 7, 27, 6, 0);
+  return prolongedElapsedHours(startedAt, at30h) === 24;
+})());
+
+t("the HIIT nudge never fires before the override is off, unshown, and three weeks in", (() => {
+  const today = new Date(2026, 7, 26);
+  const base = { startDate: dateKey(today), stagePin: null, breakFastOnHiit: false, hiitPromptShown: false };
+  return !hiitPromptEligible({ ...base, breakFastOnHiit: true }, today)
+    && !hiitPromptEligible({ ...base, hiitPromptShown: true }, today)
+    && !hiitPromptEligible({ ...base, startDate: null }, today)
+    && !hiitPromptEligible(base, today); // day zero of the ramp — nowhere near three weeks
 })());
 
 /* -------- plans -------- */

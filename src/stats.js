@@ -56,7 +56,7 @@ export function completionForDate(phases, date, live, events) {
  * phase began, and not in the future. A date inside that range with no stored
  * record is a real 0%, not a gap.
  */
-function elapsedDates(phases, from, to) {
+export function elapsedDates(phases, from, to) {
   const out = [];
   const last = startOfDay(to);
   for (let d = startOfDay(from); d <= last; d = addDays(d, 1)) {

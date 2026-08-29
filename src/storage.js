@@ -30,6 +30,9 @@ export const K = {
   phases: "watchbell:phases",
   adminCompletions: "watchbell:admin:completions",
   adminDeferrals: "watchbell:admin:deferrals",
+  fasting: "watchbell:fasting",
+  prolongedFast: "watchbell:fasting:prolonged",
+  prolongedFastLog: "watchbell:fasting:prolongedLog",
   // Pre-phases format. Still read on first launch after an update so an
   // existing passage survives, and still written so a rollback finds it.
   start: "watchbell:voyageStart",

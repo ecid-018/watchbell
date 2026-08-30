@@ -119,6 +119,9 @@ export const utcLabel = (hours) => {
   return `${hours < 0 ? "−" : "+"}${hh}${mm ? `:${String(mm).padStart(2, "0")}` : ""}`;
 };
 
+/** Half-hour granularity covers every zone a ship keeps, India's +5:30 included. */
+export const UTC_CHOICES = Array.from({ length: 53 }, (_, i) => -12 + i * 0.5);
+
 export const mins = (h) => parseInt(h.slice(0, 2), 10) * 60 + parseInt(h.slice(2), 10);
 
 export const addMin = (h, m) => {

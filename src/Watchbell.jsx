@@ -15,8 +15,8 @@ import React, { useState, useMemo, useEffect, lazy, Suspense } from "react";
 
 import { F, THEME, isDark } from "./theme.js";
 import {
-  TAGS, currentItem, dayPlan, eveningFor,
-  minutesOfDay, nextItem, pretty, windowEnd,
+  TAGS, UTC_CHOICES, currentItem, dayPlan, eveningFor,
+  minutesOfDay, nextItem, openForUTC, pretty, utcLabel, windowEnd,
 } from "./schedule.js";
 import { K, readJSON, readLog, writeJSON, getQuotaInfo } from "./storage.js";
 import { addDays, clockDate, dateKey, parseKey, prettyDate } from "./voyage.js";
@@ -115,10 +115,24 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const legIdx = legOverride ?? autoLegIdx;
   const previewing = legOverride !== null && legOverride !== autoLegIdx;
 
+  // The clock walk assumes an even change across the passage; the ship's
+  // actual clock does not have to agree with it. Scoped to this phase's
+  // start, so a stale correction from a finished passage is never read for
+  // a new one — App.jsx remounts Watchbell on every phase change anyway,
+  // which is what lets this be a plain lazy initializer rather than an effect.
+  const [utcOverride, setUtcOverride] = useState(() => {
+    const saved = readJSON(K.utcOverride, null);
+    return saved && saved.phaseStart === phase.start ? saved.offset : null;
+  });
+  const [editingUtc, setEditingUtc] = useState(false);
+  const applyUtcOverride = (l) =>
+    utcOverride == null || !l.utc ? l : { ...l, utcHours: utcOverride, utc: utcLabel(utcOverride), open: openForUTC(utcOverride) };
+
   const dark = isDark(mode, now);
   const C = dark ? THEME.dark : THEME.light;
 
-  const leg = legs[legIdx];
+  const rawLeg = legs[legIdx]; // legIdx, not autoLegIdx — may be a previewed leg
+  const leg = previewing ? rawLeg : applyUtcOverride(rawLeg);
   // Live, the day is the calendar's. Previewing another leg, fall back to that
   // leg's midpoint — the original component's rule, kept so look-ahead reads the same.
   const day = previewing ? Math.round((leg.d0 + leg.d1) / 2) : realDay;
@@ -183,7 +197,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   // The highlight is always the live day's, never the previewed leg's: it answers
   // "what should I be doing now", which a look-ahead cannot change.
-  const liveLeg = legs[autoLegIdx];
+  const liveLeg = applyUtcOverride(legs[autoLegIdx]);
   const liveItems = useMemo(
     () => applyFastingWindow(dayItems(liveLeg, todayKey, events), fastingWindow, prolongedActive),
     [liveLeg, todayKey, events, fastingStage, isHiitToday, fasting.breakFastOnHiit, prolongedActive],
@@ -244,6 +258,9 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => writeJSON(K.fasting, fasting), [fasting]);
   useEffect(() => writeJSON(K.prolongedFast, prolongedFast), [prolongedFast]);
   useEffect(() => writeJSON(K.prolongedFastLog, prolongedFastLog), [prolongedFastLog]);
+  useEffect(() => {
+    writeJSON(K.utcOverride, utcOverride == null ? null : { phaseStart: phase.start, offset: utcOverride });
+  }, [utcOverride, phase.start]);
   useEffect(() => saveStore("jobs", jobs), [jobs]);
   useEffect(() => saveStore("plans", plans), [plans]);
   useEffect(() => saveStore("events", events), [events]);
@@ -573,31 +590,63 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   };
 
   const clockBand = () => (
-    <div className="flex items-end justify-between">
-      <div>
-        <div style={eyebrow}>SHIP'S TIME</div>
-        <div className="flex items-baseline gap-1.5" style={{ marginTop: 2 }}>
-          <span style={{
-            fontFamily: F.mono, fontSize: wide ? 56 : 46, fontWeight: 600,
-            letterSpacing: "-.035em", lineHeight: 1, color: C.text,
-            fontVariantNumeric: "tabular-nums",
-          }}>
-            {String(now.getHours()).padStart(2, "0")}:{String(now.getMinutes()).padStart(2, "0")}
-          </span>
-          <span style={{
-            fontFamily: F.mono, fontSize: wide ? 20 : 17, fontWeight: 500,
-            color: C.dim, fontVariantNumeric: "tabular-nums",
-          }}>
-            {String(now.getSeconds()).padStart(2, "0")}
-          </span>
+    <div>
+      <div className="flex items-end justify-between">
+        <div>
+          <div style={eyebrow}>SHIP'S TIME</div>
+          <div className="flex items-baseline gap-1.5" style={{ marginTop: 2 }}>
+            <span style={{
+              fontFamily: F.mono, fontSize: wide ? 56 : 46, fontWeight: 600,
+              letterSpacing: "-.035em", lineHeight: 1, color: C.text,
+              fontVariantNumeric: "tabular-nums",
+            }}>
+              {String(now.getHours()).padStart(2, "0")}:{String(now.getMinutes()).padStart(2, "0")}
+            </span>
+            <span style={{
+              fontFamily: F.mono, fontSize: wide ? 20 : 17, fontWeight: 500,
+              color: C.dim, fontVariantNumeric: "tabular-nums",
+            }}>
+              {String(now.getSeconds()).padStart(2, "0")}
+            </span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: ".08em", color: C.text2 }}>{clockDate(now)}</div>
+          {leg.utc ? (
+            <button onClick={() => setEditingUtc(!editingUtc)} className="wb-t" style={{
+              fontFamily: F.mono, fontSize: 10.5, color: utcOverride != null ? C.oxide : C.amber, marginTop: 2,
+            }}>
+              UTC {leg.utc}{utcOverride != null ? " · manual" : ""}
+            </button>
+          ) : (
+            <div style={{ fontFamily: F.mono, fontSize: 10.5, color: C.amber, marginTop: 2 }}>ALONGSIDE</div>
+          )}
         </div>
       </div>
-      <div className="text-right">
-        <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: ".08em", color: C.text2 }}>{clockDate(now)}</div>
-        <div style={{ fontFamily: F.mono, fontSize: 10.5, color: C.amber, marginTop: 2 }}>
-          {leg.utc ? `UTC ${leg.utc}` : "ALONGSIDE"}
+      {editingUtc && leg.utc && (
+        <div className="wb-t rounded-2xl mt-3 p-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+          <div style={eyebrow}>ACTUAL UTC OFFSET ONBOARD</div>
+          <select value={utcOverride ?? legs[autoLegIdx].utcHours} onChange={(e) => setUtcOverride(Number(e.target.value))}
+            className="wb-t w-full rounded-xl mt-2 px-3" style={{
+              fontFamily: F.mono, fontSize: 16, color: C.text, height: 44,
+              background: C.card, border: `1px solid ${C.line2}`,
+              WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
+            }}>
+            {UTC_CHOICES.map((v) => <option key={v} value={v}>{utcLabel(v)}</option>)}
+          </select>
+          {utcOverride != null && (
+            <button onClick={() => setUtcOverride(null)} className="wb-t w-full rounded-xl mt-2 py-2"
+              style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
+              Reset to automatic
+            </button>
+          )}
+          <div style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 8, color: C.dim2 }}>
+            The passage assumes an even clock change from departure to arrival. If the ship actually
+            changed clocks on a different day, set the real offset here — cash open and the label
+            follow it until you change it again or reset to automatic.
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 
@@ -1445,7 +1494,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
         {wide ? (
           <div className="flex flex-1 min-h-0">
-            <div className="flex flex-col shrink-0 overflow-y-auto wb-x" style={{ width: 384, borderRight: `1px solid ${C.line}` }}>
+            <div className="flex flex-col shrink-0 overflow-y-auto wb-x" style={{
+              width: tab === "word" ? 320 : 384, borderRight: `1px solid ${C.line}`,
+              transition: "width .18s ease",
+            }}>
               {rail}
             </div>
             <div className="flex-1 flex flex-col min-h-0">{main}</div>

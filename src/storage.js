@@ -33,6 +33,7 @@ export const K = {
   fasting: "watchbell:fasting",
   prolongedFast: "watchbell:fasting:prolonged",
   prolongedFastLog: "watchbell:fasting:prolongedLog",
+  utcOverride: "watchbell:utcOverride",
   // Pre-phases format. Still read on first launch after an update so an
   // existing passage survives, and still written so a rollback finds it.
   start: "watchbell:voyageStart",

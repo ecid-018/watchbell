@@ -27,9 +27,14 @@ export default function WordTab({
   const [draft, setDraft] = useState(reflection ?? "");
   const [pen, setPen] = useState(null); // the marker in your hand, or none
   const [text, setText] = useState(null);
+  // A saved reflection opens locked; Edit reopens it. Keyed to readDay alone
+  // (not isRead/reflection, which also change on the onBlur autosave below) —
+  // otherwise typing a single character would silently drop you out of edit.
+  const [editing, setEditing] = useState(!isRead);
 
   // A different day is a different reflection; keep the editor honest.
   useEffect(() => { setDraft(reflection ?? ""); }, [readDay, reflection]);
+  useEffect(() => { setEditing(!isRead); }, [readDay]);
 
   useEffect(() => {
     let alive = true;
@@ -48,6 +53,7 @@ export default function WordTab({
   const body = draft.trim();
   const short = Math.max(0, REFLECT_MIN - body.length);
   const enough = short === 0;
+  const locked = isRead && !editing;
 
   const eyebrow = { fontFamily: F.mono, fontSize: 9, letterSpacing: ".12em", color: C.dim2 };
 
@@ -61,6 +67,8 @@ export default function WordTab({
   const append = (mark) => {
     const line = quote(mark);
     setDraft((d) => (d.trim() ? `${d.replace(/\s+$/, "")}\n\n${line}` : line));
+    // A note sent to a saved reflection needs to be visible to be worth sending.
+    if (isRead) setEditing(true);
   };
 
   /* -------- the marker -------- */
@@ -140,23 +148,38 @@ export default function WordTab({
       </div>
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
         onBlur={() => onReflect(readDay, draft)}
+        readOnly={locked}
         rows={wide ? 8 : 3}
         placeholder="What it said. What you will do."
         className="wb-t w-full rounded-xl mt-2 px-3 py-2" style={{
-          fontFamily: F.serif, fontSize: 16, lineHeight: 1.5, color: C.text,
-          background: C.card, border: `1px solid ${C.line2}`,
+          fontFamily: F.serif, fontSize: 16, lineHeight: 1.5, color: locked ? C.text2 : C.text,
+          background: locked ? C.panel : C.card, border: `1px solid ${C.line2}`,
           resize: "none", WebkitAppearance: "none",
         }} />
       <div className="flex gap-2 mt-2">
-        <button onClick={() => enough && onRead(readDay, draft)} disabled={!enough}
-          className="wb-t flex-1 rounded-xl py-2.5" style={{
-            fontSize: 13.5, fontWeight: 600,
-            background: enough ? C.gold : "transparent",
-            color: enough ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim2,
-            border: `1px solid ${enough ? C.gold : C.line2}`,
-          }}>
-          {isRead ? "Save" : "Mark read"}
-        </button>
+        {locked ? (
+          <>
+            <div className="flex-1 rounded-xl py-2.5 text-center" style={{
+              fontSize: 13.5, fontWeight: 600, color: C.foam, border: `1px solid ${C.foam}66`,
+            }}>
+              Saved
+            </div>
+            <button onClick={() => setEditing(true)} className="wb-t rounded-xl px-4"
+              style={{ fontSize: 13, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+              Edit
+            </button>
+          </>
+        ) : (
+          <button onClick={() => { if (enough) { onRead(readDay, draft); setEditing(false); } }} disabled={!enough}
+            className="wb-t flex-1 rounded-xl py-2.5" style={{
+              fontSize: 13.5, fontWeight: 600,
+              background: enough ? C.gold : "transparent",
+              color: enough ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim2,
+              border: `1px solid ${enough ? C.gold : C.line2}`,
+            }}>
+            {isRead ? "Save" : "Mark read"}
+          </button>
+        )}
         {isRead && (
           <button onClick={() => onUnread(readDay)} className="wb-t rounded-xl px-4"
             style={{ fontSize: 12.5, color: C.oxide, border: `1px solid ${C.line2}` }}>

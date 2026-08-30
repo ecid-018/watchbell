@@ -15,16 +15,13 @@ import { F, THEME, isDark } from "./theme.js";
 import { K, readJSON } from "./storage.js";
 import { dateKey } from "./voyage.js";
 import { LEGACY_PREFILL, isLegacy } from "./phase.js";
-import { openForUTC, utcLabel } from "./schedule.js";
+import { UTC_CHOICES, openForUTC, utcLabel } from "./schedule.js";
 
 const COPY = {
   first: { eyebrow: "STANDING ORDERS", verb: "Begin passage", sub: "Where the ship is, and since when" },
   edit: { eyebrow: "CHANGE STANDING ORDERS", verb: "Save", sub: "Correct the passage as logged" },
   next: { eyebrow: "PASSAGE COMPLETE — WHAT NOW", verb: "Log it in", sub: "Put to sea again, or lie alongside" },
 };
-
-/** Half-hour granularity covers every zone a ship keeps, India's +5:30 included. */
-const UTC_CHOICES = Array.from({ length: 53 }, (_, i) => -12 + i * 0.5);
 
 export default function Setup({ mode = "first", value, onSave, onCancel }) {
   const now = new Date();

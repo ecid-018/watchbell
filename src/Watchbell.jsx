@@ -16,7 +16,7 @@ import React, { useState, useMemo, useEffect, lazy, Suspense } from "react";
 import { F, THEME, isDark } from "./theme.js";
 import {
   TAGS, UTC_CHOICES, currentItem, dayPlan, eveningFor,
-  minutesOfDay, nextItem, openForUTC, pretty, utcLabel, windowEnd,
+  minutesOfDay, nextItem, openForUTC, parseUtcLabel, pretty, utcLabel, windowEnd,
 } from "./schedule.js";
 import { K, readJSON, readLog, writeJSON, getQuotaInfo } from "./storage.js";
 import { addDays, clockDate, dateKey, parseKey, prettyDate } from "./voyage.js";
@@ -127,6 +127,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [editingUtc, setEditingUtc] = useState(false);
   const applyUtcOverride = (l) =>
     utcOverride == null || !l.utc ? l : { ...l, utcHours: utcOverride, utc: utcLabel(utcOverride), open: openForUTC(utcOverride) };
+  // The legacy route's hand-written legs never carried a plain number, only
+  // the formatted label — fall back to parsing it so the picker still opens
+  // on the offset actually in force rather than defaulting to −12.
+  const utcHoursOf = (l) => l.utcHours ?? parseUtcLabel(l.utc);
 
   const dark = isDark(mode, now);
   const C = dark ? THEME.dark : THEME.light;
@@ -626,7 +630,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       {editingUtc && leg.utc && (
         <div className="wb-t rounded-2xl mt-3 p-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
           <div style={eyebrow}>ACTUAL UTC OFFSET ONBOARD</div>
-          <select value={utcOverride ?? legs[autoLegIdx].utcHours} onChange={(e) => setUtcOverride(Number(e.target.value))}
+          <select value={utcOverride ?? utcHoursOf(legs[autoLegIdx])} onChange={(e) => setUtcOverride(Number(e.target.value))}
             className="wb-t w-full rounded-xl mt-2 px-3" style={{
               fontFamily: F.mono, fontSize: 16, color: C.text, height: 44,
               background: C.card, border: `1px solid ${C.line2}`,
@@ -1212,15 +1216,18 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const scoreTab = () => (
     <div>
-      <div className={wide ? "grid grid-cols-7 gap-3 mb-3" : ""}>
-        <div className="wb-t rounded-2xl p-5 mb-3 text-center" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+      <div className={wide ? "flex gap-3 mb-3 items-stretch" : ""}>
+        <div className="wb-t rounded-2xl p-5 mb-3 text-center" style={{
+          background: C.sub, border: `1px solid ${C.line2}`,
+          ...(wide ? { flex: "0 0 210px" } : {}),
+        }}>
           <div style={eyebrow}>ROLLING SEVEN DAYS</div>
           <div style={{ fontSize: 60, fontWeight: 700, letterSpacing: "-.04em", lineHeight: 1.02, marginTop: 4, color: C.foam }}>
             {r7 ? r7.pct : "—"}{r7 && <span style={{ fontSize: 26, fontWeight: 600 }}>%</span>}
           </div>
           <div style={{ fontSize: 12.5, marginTop: 2, color: C.text2 }}>{hit} of {todayDoable.length} logged today</div>
         </div>
-        <div className={wide ? "contents" : "grid grid-cols-2 gap-2 mb-3"}>
+        <div className={wide ? "grid grid-cols-3 gap-3 flex-1" : "grid grid-cols-2 gap-2 mb-3"}>
           {[
             ["Grace days", String(grace.left), "left this week", grace.left === 0 ? C.oxide : C.amber],
             ["On plan", plan7 ? `${plan7.hit}/${plan7.total}` : "—", "sessions to rule", C.foam],

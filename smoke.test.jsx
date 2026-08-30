@@ -8,7 +8,7 @@ import JobsTab from "./src/JobsTab.jsx";
 import WeekTab from "./src/WeekTab.jsx";
 import PlansTab from "./src/PlansTab.jsx";
 import { THEME } from "./src/theme.js";
-import { doableForLeg, eveningFor, itemsForLeg } from "./src/schedule.js";
+import { doableForLeg, eveningFor, itemsForLeg, parseUtcLabel } from "./src/schedule.js";
 import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
 import { CARRY_WARN, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
@@ -239,6 +239,15 @@ const morning = byId(dayItems(seaLeg, after, [overnight]));
 t("the wake moves later by what was lost", morning.wake.t === "0830" && morning.wake.shifted);
 t("the morning keeps its spacing",       morning.word.t === "0835" && morning.prep.t === "0940");
 t("the desk stands down on recovery",    morning.trade.stood && /recovery/.test(morning.trade.why));
+
+/* -------- the legacy route's offsets, read back out of its own labels -------- */
+
+t("parseUtcLabel reverses utcLabel for the legacy leg table", (() => {
+  return parseUtcLabel("−5") === -5
+    && parseUtcLabel("+5:30") === 5.5
+    && parseUtcLabel("+1") === 1
+    && parseUtcLabel("0") === 0;
+})());
 
 /* -------- jobs -------- */
 

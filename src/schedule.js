@@ -119,6 +119,15 @@ export const utcLabel = (hours) => {
   return `${hours < 0 ? "−" : "+"}${hh}${mm ? `:${String(mm).padStart(2, "0")}` : ""}`;
 };
 
+/** The reverse of utcLabel — needed because the legacy route's hand-written
+    LEGS table only ever carried the formatted string, never a plain number. */
+export const parseUtcLabel = (label) => {
+  const m = /^([+−-]?)(\d+)(?::(\d{2}))?$/.exec(String(label ?? "").trim());
+  if (!m) return 0;
+  const sign = m[1] === "−" || m[1] === "-" ? -1 : 1;
+  return sign * (Number(m[2]) + (m[3] ? Number(m[3]) / 60 : 0));
+};
+
 /** Half-hour granularity covers every zone a ship keeps, India's +5:30 included. */
 export const UTC_CHOICES = Array.from({ length: 53 }, (_, i) => -12 + i * 0.5);
 

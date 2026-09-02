@@ -191,19 +191,30 @@ export default function WordTab({
       {marked.length > 0 && (
         <>
           <div style={{ ...eyebrow, marginTop: 14, marginBottom: 4 }}>MARKED · {marked.length}</div>
-          {marked.map((m) => (
-            <div key={`${m.ref.book}${m.ref.chapter}:${m.verse}`} className="flex items-start gap-2 py-1">
-              <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, marginTop: 6, background: C[m.colour] }} />
-              <span className="flex-1" style={{ fontFamily: F.serif, fontSize: 12.5, lineHeight: 1.45, color: C.text2 }}>
-                <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.dim2, marginRight: 4 }}>{m.verse}</span>
-                {m.text}
-              </span>
-              <button onClick={() => append(m)} className="wb-t shrink-0 rounded-md px-2 py-0.5"
-                style={{ fontFamily: F.mono, fontSize: 9.5, color: C.text2, border: `1px solid ${C.line2}` }}>
-                → NOTE
-              </button>
-            </div>
-          ))}
+          {/* Its own scroll, capped short, so the field above never has to move
+              out from under you just because the marked list grew. */}
+          <div style={{ maxHeight: 220, overflowY: "auto" }}>
+            {marked.map((m) => {
+              const noted = draft.includes(quote(m));
+              return (
+                <div key={`${m.ref.book}${m.ref.chapter}:${m.verse}`} className="flex items-start gap-2 py-1">
+                  <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, marginTop: 6, background: C[m.colour] }} />
+                  <span className="flex-1" style={{ fontFamily: F.serif, fontSize: 12.5, lineHeight: 1.45, color: C.text2 }}>
+                    <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.dim2, marginRight: 4 }}>{m.verse}</span>
+                    {m.text}
+                  </span>
+                  <button onClick={() => !noted && append(m)} className="wb-t shrink-0 rounded-md px-2 py-0.5"
+                    style={{
+                      fontFamily: F.mono, fontSize: 9.5,
+                      color: noted ? C.foam : C.text2,
+                      border: `1px solid ${noted ? `${C.foam}66` : C.line2}`,
+                    }}>
+                    {noted ? "✓ ADDED" : "→ NOTE"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </>
       )}
     </div>

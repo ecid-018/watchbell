@@ -11,12 +11,7 @@ import { F } from "./theme.js";
 import { compressImage } from "./imagepipe.js";
 import { readExifDate } from "./exif.js";
 import { getUnassignedPhotos, photoCountsByJob, putPhoto, newPhotoId, updatePhoto } from "./photodb.js";
-import { useObjectUrl } from "./usePhotos.js";
-
-function Thumb({ blob }) {
-  const url = useObjectUrl(blob);
-  return url ? <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null;
-}
+import PhotoImage from "./PhotoImage.jsx";
 
 export default function BatchAttachView({ C, dark, wide, jobs }) {
   const [photos, setPhotos] = useState([]);
@@ -24,6 +19,7 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
   const [selected, setSelected] = useState(null);
   const [importing, setImporting] = useState(false);
   const [showSkipped, setShowSkipped] = useState(false);
+  const [error, setError] = useState(null);
 
   const refresh = () => {
     getUnassignedPhotos().then(setPhotos);
@@ -36,19 +32,28 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
     e.target.value = "";
     if (!files.length) return;
     setImporting(true);
-    for (const file of files) {
-      const exifDate = await file.arrayBuffer().then(readExifDate).catch(() => null);
-      const full = await compressImage(file);
-      const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
-      await putPhoto({
-        id: newPhotoId(), jobId: "", blob: full.blob, thumbBlob: thumb.blob,
-        tag: "after", capturedAt: (exifDate || new Date()).toISOString(),
-        exifDate: exifDate ? exifDate.toISOString() : null, source: "library",
-        width: full.width, height: full.height, bytes: full.blob.size,
-      });
+    setError(null);
+    try {
+      for (const file of files) {
+        const exifDate = await file.arrayBuffer().then(readExifDate).catch(() => null);
+        const full = await compressImage(file);
+        const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
+        await putPhoto({
+          id: newPhotoId(), jobId: "", blob: full.blob, thumbBlob: thumb.blob,
+          tag: "after", capturedAt: (exifDate || new Date()).toISOString(),
+          exifDate: exifDate ? exifDate.toISOString() : null, source: "library",
+          width: full.width, height: full.height, bytes: full.blob.size,
+        });
+      }
+    } catch (e) {
+      // Whatever landed before the bad one stays; the import stops there
+      // rather than reporting a clean run it did not have.
+      console.warn("Watchbell: could not import a photo.", e);
+      setError("One of those photos could not be read. The rest were imported.");
+    } finally {
+      setImporting(false);
+      refresh();
     }
-    setImporting(false);
-    refresh();
   };
 
   const pair = async (jobId) => {
@@ -79,6 +84,10 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
         <input type="file" accept="image/*" multiple hidden onChange={onFiles} disabled={importing} />
       </label>
 
+      {error && (
+        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: C.oxide, padding: "0 2px 8px" }}>{error}</div>
+      )}
+
       <div style={{ fontSize: 11.5, lineHeight: 1.5, padding: "0 2px 10px", color: C.dim2 }}>
         {unpaired.length > 0
           ? `${unpaired.length} job${unpaired.length === 1 ? "" : "s"} still have no photo.`
@@ -93,7 +102,8 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
               className="wb-t w-full rounded-lg overflow-hidden" style={{
                 aspectRatio: "1", border: `2px solid ${selected === p.id ? C.amber : C.line2}`,
               }}>
-              <Thumb blob={p.thumbBlob || p.blob} />
+              <PhotoImage blob={p.thumbBlob || p.blob} C={C} compact
+                style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </button>
             <button onClick={() => skip(p.id)} className="wb-t absolute rounded-full flex items-center justify-center"
               style={{ top: -6, right: -6, width: 20, height: 20, fontSize: 11, background: C.card, border: `1px solid ${C.line2}`, color: C.dim }}
@@ -131,7 +141,8 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
           {showSkipped && skipped.map((p) => (
             <div key={p.id} className="flex items-center gap-3 py-1.5 px-2">
               <div className="rounded-lg overflow-hidden shrink-0" style={{ width: 36, height: 36 }}>
-                <Thumb blob={p.thumbBlob || p.blob} />
+                <PhotoImage blob={p.thumbBlob || p.blob} C={C} compact
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
               <span className="flex-1" style={{ fontSize: 12, color: C.dim }}>
                 {p.exifDate ? new Date(p.exifDate).toLocaleDateString() : "date unknown"}

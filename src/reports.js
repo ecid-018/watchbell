@@ -7,15 +7,9 @@
 ------------------------------------------------------------------ */
 
 import { getPhotosForJob } from "./photodb.js";
+import { blobToDataUrl } from "./imagepipe.js";
 import { renderReportHtml, escapeHtml } from "./reportShell.js";
 import { prettyDate } from "./voyage.js";
-
-const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = () => resolve(reader.result);
-  reader.onerror = reject;
-  reader.readAsDataURL(blob);
-});
 
 const isPscItem = (j) => j.priority === "psc" || j.priority === "defect";
 const groupOf = (j) => j.group || "Ungrouped";
@@ -65,8 +59,14 @@ export function periodReportData(jobs, fromKey, toKey) {
 
 async function photoFigures(jobId) {
   const photos = await getPhotosForJob(jobId);
-  const withUrls = await Promise.all(photos.map(async (p) => ({ ...p, url: await blobToDataUrl(p.blob) })));
-  return withUrls.sort((a, b) => (a.tag === b.tag ? 0 : a.tag === "before" ? -1 : 1));
+  // A photo the browser cannot read drops out of the figure block rather
+  // than taking the whole report down with it — the tables are the report,
+  // and one unreadable JPEG is not a reason to hand back nothing.
+  const withUrls = await Promise.all(photos.map(async (p) => {
+    try { return { ...p, url: await blobToDataUrl(p.blob) }; }
+    catch (e) { console.warn("Watchbell: leaving an unreadable photo out of the report.", e); return null; }
+  }));
+  return withUrls.filter(Boolean).sort((a, b) => (a.tag === b.tag ? 0 : a.tag === "before" ? -1 : 1));
 }
 
 const photosBlock = (photos) => (photos.length

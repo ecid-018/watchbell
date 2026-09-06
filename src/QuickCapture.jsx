@@ -14,16 +14,26 @@ export default function QuickCapture({ C, dark, onClose, onSave }) {
   const [title, setTitle] = useState("");
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
   const onFile = async (e) => {
     const file = e.target.files[0];
     e.target.value = "";
     if (!file) return;
     setBusy(true);
-    const full = await compressImage(file);
-    const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
-    setPhoto({ full, thumb });
-    setBusy(false);
+    setError(null);
+    try {
+      const full = await compressImage(file);
+      const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
+      setPhoto({ full, thumb });
+    } catch (err) {
+      // The title is still worth saving on its own — only the photo is lost.
+      console.warn("Watchbell: could not read that photo.", err);
+      setPhoto(null);
+      setError("That photo could not be read. The job will save without it.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const save = async () => {
@@ -63,6 +73,10 @@ export default function QuickCapture({ C, dark, onClose, onSave }) {
             {busy ? "Compressing…" : photo ? "Photo attached ✓" : "Camera"}
             <input type="file" accept="image/*" capture="environment" hidden onChange={onFile} disabled={busy} />
           </label>
+
+          {error && (
+            <div style={{ fontSize: 11.5, lineHeight: 1.4, color: C.oxide, paddingTop: 6 }}>{error}</div>
+          )}
 
           <button onClick={save} disabled={!title.trim() || busy} className="wb-t w-full rounded-xl mt-4 py-3"
             style={{

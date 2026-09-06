@@ -7,10 +7,9 @@ import React, { useRef, useState } from "react";
 ------------------------------------------------------------------ */
 
 import { F } from "./theme.js";
-import { useObjectUrl } from "./usePhotos.js";
+import PhotoImage from "./PhotoImage.jsx";
 
-function ZoomImage({ blob }) {
-  const url = useObjectUrl(blob);
+function ZoomImage({ C, blob }) {
   const [xform, setXform] = useState({ scale: 1, x: 0, y: 0 });
   const gesture = useRef(null);
 
@@ -38,13 +37,11 @@ function ZoomImage({ blob }) {
   return (
     <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={() => { gesture.current = null; }} onDoubleClick={reset}
       style={{ flex: 1, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none" }}>
-      {url && (
-        <img src={url} alt="" style={{
-          maxWidth: "100%", maxHeight: "100%",
-          transform: `translate(${xform.x}px, ${xform.y}px) scale(${xform.scale})`,
-          transition: gesture.current ? "none" : "transform .15s ease",
-        }} />
-      )}
+      <PhotoImage blob={blob} C={C} style={{
+        maxWidth: "100%", maxHeight: "100%",
+        transform: `translate(${xform.x}px, ${xform.y}px) scale(${xform.scale})`,
+        transition: gesture.current ? "none" : "transform .15s ease",
+      }} />
     </div>
   );
 }
@@ -67,7 +64,7 @@ export default function PhotoViewer({ C, dark, photos, activeId, onClose, onTag,
         <button onClick={onClose} style={{ color: "#E9F0EF", fontSize: 22, lineHeight: 1 }} aria-label="Close">×</button>
       </div>
 
-      <ZoomImage key={photo.id} blob={photo.blob} />
+      <ZoomImage key={photo.id} C={C} blob={photo.blob} />
 
       <div className="px-4 pb-4 pt-2 flex items-center gap-2">
         {["before", "after"].map((t) => (

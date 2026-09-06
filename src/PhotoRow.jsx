@@ -7,37 +7,43 @@ import React, { useState } from "react";
 ------------------------------------------------------------------ */
 
 import { F } from "./theme.js";
-import { usePhotosForJob, useObjectUrl } from "./usePhotos.js";
+import { usePhotosForJob } from "./usePhotos.js";
 import { compressImage } from "./imagepipe.js";
 import { readExifDate } from "./exif.js";
 import { putPhoto, newPhotoId, deletePhoto, updatePhoto } from "./photodb.js";
+import PhotoImage from "./PhotoImage.jsx";
 import PhotoViewer from "./PhotoViewer.jsx";
 
-function Thumb({ blob }) {
-  const url = useObjectUrl(blob);
-  return url ? <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null;
-}
-
 export default function PhotoRow({ C, dark, job, defaultTag }) {
-  const { photos, refresh } = usePhotosForJob(job.id);
+  const { photos, refresh, patch } = usePhotosForJob(job.id);
   const [viewing, setViewing] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
   const ingest = async (files, source) => {
     setBusy(true);
-    for (const file of files) {
-      const exifDate = source === "library" ? await file.arrayBuffer().then(readExifDate).catch(() => null) : null;
-      const full = await compressImage(file);
-      const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
-      await putPhoto({
-        id: newPhotoId(), jobId: job.id, blob: full.blob, thumbBlob: thumb.blob,
-        tag: defaultTag, capturedAt: (exifDate || new Date()).toISOString(),
-        exifDate: exifDate ? exifDate.toISOString() : null, source,
-        width: full.width, height: full.height, bytes: full.blob.size,
-      });
+    setError(null);
+    try {
+      for (const file of files) {
+        const exifDate = source === "library" ? await file.arrayBuffer().then(readExifDate).catch(() => null) : null;
+        const full = await compressImage(file);
+        const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
+        await putPhoto({
+          id: newPhotoId(), jobId: job.id, blob: full.blob, thumbBlob: thumb.blob,
+          tag: defaultTag, capturedAt: (exifDate || new Date()).toISOString(),
+          exifDate: exifDate ? exifDate.toISOString() : null, source,
+          width: full.width, height: full.height, bytes: full.blob.size,
+        });
+      }
+    } catch (e) {
+      // Say it, rather than leaving the + spinning on a photo that never
+      // made it into storage.
+      console.warn("Watchbell: could not store a photo.", e);
+      setError("That photo could not be read. Try again, or pick another.");
+    } finally {
+      setBusy(false);
+      refresh();
     }
-    setBusy(false);
-    refresh();
   };
 
   const onCamera = (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) ingest(f, "camera"); };
@@ -49,7 +55,8 @@ export default function PhotoRow({ C, dark, job, defaultTag }) {
         {photos.map((p) => (
           <button key={p.id} onClick={() => setViewing(p.id)} className="wb-t shrink-0 rounded-lg overflow-hidden relative"
             style={{ width: 56, height: 56, border: `1px solid ${C.line2}` }}>
-            <Thumb blob={p.thumbBlob || p.blob} />
+            <PhotoImage blob={p.thumbBlob || p.blob} C={C} compact
+              style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             <span className="absolute" style={{
               left: 2, bottom: 2, fontFamily: F.mono, fontSize: 8, fontWeight: 700, letterSpacing: ".04em",
               color: "#fff", background: "rgba(0,0,0,.55)", padding: "1px 4px", borderRadius: 4, textTransform: "uppercase",
@@ -67,11 +74,19 @@ export default function PhotoRow({ C, dark, job, defaultTag }) {
           <input type="file" accept="image/*" multiple hidden onChange={onLibrary} disabled={busy} />
         </label>
       </div>
+      {error && (
+        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: C.oxide, padding: "6px 2px 0" }}>{error}</div>
+      )}
       {viewing && (
         <PhotoViewer
           C={C} dark={dark} photos={photos} activeId={viewing}
           onClose={() => setViewing(null)}
-          onTag={async (id, tag) => { await updatePhoto(id, { tag }); refresh(); }}
+          onTag={async (id, tag) => {
+            // In place: the tag is the only thing changing, and re-reading
+            // the record would swap the blob the viewer is showing.
+            patch(id, { tag });
+            if (!(await updatePhoto(id, { tag }))) refresh();
+          }}
           onDelete={async (id) => { await deletePhoto(id); refresh(); setViewing(null); }}
         />
       )}

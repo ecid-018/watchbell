@@ -76,6 +76,7 @@ export default function Setup({ mode = "first", value, onSave, onCancel }) {
     fontFamily: F.mono, fontSize: 16, color: C.text,
     background: C.sub, border: `1px solid ${C.line2}`,
     height: 48, WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
+    minWidth: 0,
   };
   const eyebrow = { fontFamily: F.mono, fontSize: 9, letterSpacing: ".12em", color: C.dim2 };
 
@@ -121,13 +122,13 @@ export default function Setup({ mode = "first", value, onSave, onCancel }) {
           {kind === "voyage" ? (
             <>
               <div className="flex gap-2">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div style={eyebrow}>DEPARTURE PORT</div>
                   <input type="text" value={from} onChange={(e) => setFrom(e.target.value)}
                     placeholder="New Orleans" autoCapitalize="words" autoCorrect="off"
                     className="wb-t w-full rounded-xl mt-2 px-3" style={{ ...field, fontFamily: F.ui }} />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div style={eyebrow}>ARRIVAL PORT</div>
                   <input type="text" value={to} onChange={(e) => setTo(e.target.value)}
                     placeholder="Mundra" autoCapitalize="words" autoCorrect="off"
@@ -136,12 +137,12 @@ export default function Setup({ mode = "first", value, onSave, onCancel }) {
               </div>
 
               <div className="flex gap-2 mt-5">
-                <div className="flex-[1.4]">
+                <div className="flex-[1.4] min-w-0">
                   <div style={eyebrow}>DEPARTURE</div>
                   <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
                     className="wb-t w-full rounded-xl mt-2 px-3" style={field} />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div style={eyebrow}>DAYS AT SEA</div>
                   <input type="number" inputMode="numeric" min="1" value={days}
                     onChange={(e) => setDays(e.target.value)}
@@ -150,14 +151,14 @@ export default function Setup({ mode = "first", value, onSave, onCancel }) {
               </div>
 
               <div className="flex gap-2 mt-5">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div style={eyebrow}>UTC AT DEPARTURE</div>
                   <select value={utc0} onChange={(e) => setUtc0(Number(e.target.value))}
                     className="wb-t w-full rounded-xl mt-2 px-3" style={field}>
                     {UTC_CHOICES.map((v) => <option key={v} value={v}>{utcLabel(v)}</option>)}
                   </select>
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div style={eyebrow}>UTC AT ARRIVAL</div>
                   <select value={utc1} onChange={(e) => setUtc1(Number(e.target.value))}
                     className="wb-t w-full rounded-xl mt-2 px-3" style={field}>

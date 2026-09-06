@@ -15,7 +15,7 @@ import { isFromBacklog, portItemVisible, pscPinned, recurringTasksFromBacklog } 
 import { BACKLOG } from "./src/data/jobs-backlog.js";
 import { pscReadiness } from "./src/psc.js";
 import { readExifDate } from "./src/exif.js";
-import { mergeRead, mergeReflect, reflectGaps, totalGapDays } from "./src/recovery.js";
+import { fileCandidate, mergeRead, mergeReflect, reflectGaps, totalGapDays } from "./src/recovery.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
 import { allRefs, fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
 import { colourOf, marksIn, quote, toggleMark } from "./src/marks.js";
@@ -365,6 +365,39 @@ t("merging read flags only fills blanks, same as reflections",
     && mergeRead({ 1: true }, { 1: false, 2: true })[2] === true);
 t("the headline figure is the union of every candidate's gaps, not a sum",
   totalGapDays([{ gaps: ["1", "2"] }, { gaps: ["2", "3"] }]) === 3);
+
+/* -------- recovering a journal from a backup file -------- */
+
+const backupFile = (data) => ({ app: "watchbell", schema: 3, exported: "2026-08-01T00:00:00Z", data });
+const LIVE_JOURNAL = { "2026-09-01": "written this month", "2026-09-02": "" };
+const OLD_BACKUP = backupFile({
+  "watchbell:reflect": { "2026-08-10": "lost entry", "2026-09-01": "the old version", "2026-09-02": "also lost" },
+  "watchbell:read": { "2026-08-10": true },
+  "watchbell:jobs": [{ id: "would_clobber" }],
+});
+
+t("a file that isn't a Watchbell backup is refused, not half-applied",
+  (() => { try { fileCandidate({ some: "other json" }, LIVE_JOURNAL); return false; } catch (e) { return true; } })());
+t("a backup file offers exactly the days the journal is missing",
+  (() => {
+    const c = fileCandidate(OLD_BACKUP, LIVE_JOURNAL);
+    return c.gaps.length === 2 && c.gaps.includes("2026-08-10") && c.gaps.includes("2026-09-02")
+      && !c.gaps.includes("2026-09-01");
+  })());
+t("merging that file leaves this month's entry exactly as written",
+  mergeReflect(LIVE_JOURNAL, fileCandidate(OLD_BACKUP, LIVE_JOURNAL).reflect)["2026-09-01"] === "written this month");
+t("and fills the blank day and the missing one",
+  (() => {
+    const merged = mergeReflect(LIVE_JOURNAL, fileCandidate(OLD_BACKUP, LIVE_JOURNAL).reflect);
+    return merged["2026-09-02"] === "also lost" && merged["2026-08-10"] === "lost entry";
+  })());
+t("a file with no journal in it recovers nothing rather than throwing",
+  fileCandidate(backupFile({ "watchbell:jobs": [] }), LIVE_JOURNAL).gaps.length === 0);
+t("the file's jobs are never part of what a journal merge carries",
+  (() => {
+    const c = fileCandidate(OLD_BACKUP, LIVE_JOURNAL);
+    return Object.keys(c).sort().join(",") === "gaps,id,label,read,reflect";
+  })());
 
 /* -------- admin cadence -------- */
 

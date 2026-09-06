@@ -92,8 +92,17 @@ export function exportAll() {
 
 /**
  * The reverse of exportAll: write every key from a backup straight back to
- * storage, then bring the result up to the current schema. Additive, like
- * every migration — an older export just backfills whatever it predates.
+ * storage, then bring the result up to the current schema.
+ *
+ * This REPLACES, key by key. It is not additive and must not be described as
+ * such: the journal, the jobs and the plans are each a single key holding
+ * every entry at once, so importing a backup taken a month ago discards
+ * everything written since. Only keys the backup does not carry survive
+ * untouched — the daily logs, which are one key per day.
+ *
+ * It is the right tool for restoring onto a bare device after a reinstall,
+ * and the wrong one for recovering a few lost days. For that, see
+ * fileCandidate() in recovery.js, which fills gaps and replaces nothing.
  */
 export function importAll(backup) {
   if (!backup || typeof backup !== "object" || backup.app !== "watchbell" ||

@@ -1,6 +1,7 @@
 /* ------------------------------------------------------------------
    Recovering reflections from wherever a copy of them survives: the
-   last seven days of auto-backup, or the one-time schema snapshot.
+   last seven days of auto-backup, the one-time schema snapshot, or a
+   backup file the engineer still has off the device.
 
    Never destructive. A candidate only ever fills a day the live journal
    is currently missing or blank — an already-written reflection is never
@@ -62,6 +63,29 @@ export function mergeRead(current, source) {
     if (val && !merged[day]) merged[day] = val;
   }
   return merged;
+}
+
+/** A backup file, sized up exactly the way an on-device copy is.
+ *
+ *  This is the safe way to bring an old export home. A plain import writes
+ *  every key straight over what is live, and the journal is a single key
+ *  holding every day at once — so importing an old backup to recover last
+ *  month would take this month out with it. This reads one thing out of the
+ *  file, the journal and the reading record, and still only fills days that
+ *  are currently blank.
+ *
+ *  @param {object} backup a parsed Watchbell export
+ *  @param {object} currentReflect the live journal
+ *  @throws if the file is not a Watchbell backup
+ */
+export function fileCandidate(backup, currentReflect, label = "backup file") {
+  if (!backup || typeof backup !== "object" || backup.app !== "watchbell" ||
+    !backup.data || typeof backup.data !== "object") {
+    throw new Error("not a Watchbell backup");
+  }
+  const reflect = backup.data[K.reflect] || {};
+  const read = backup.data[K.read] || {};
+  return { id: "file", label, reflect, read, gaps: reflectGaps(currentReflect, reflect) };
 }
 
 /** How many distinct days, across every candidate, are actually

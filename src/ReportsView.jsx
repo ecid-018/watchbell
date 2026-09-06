@@ -39,6 +39,7 @@ export default function ReportsView({ C, dark, jobs, profile, todayKey }) {
     fontFamily: F.mono, fontSize: 15, color: C.text, height: 42,
     background: C.sub, border: `1px solid ${C.line2}`, WebkitAppearance: "none",
     colorScheme: dark ? "dark" : "light",
+    minWidth: 0,
   };
 
   const run = async (key, htmlFn, filename) => {

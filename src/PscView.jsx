@@ -102,7 +102,7 @@ export default function PscView({ C, dark, wide, jobs, todayKey, daysToArrival, 
                             <input type="text" value={reason} onChange={(e) => setReason(e.target.value)}
                               placeholder="Reason" autoCapitalize="sentences"
                               className="wb-t flex-1 rounded-lg px-2" style={{
-                                fontSize: 12.5, color: C.text, height: 34,
+                                fontSize: 12.5, color: C.text, height: 34, minWidth: 0,
                                 background: C.sub, border: `1px solid ${C.line2}`,
                               }} />
                             <button onClick={() => { if (reason.trim()) { onDefer(j.id, reason.trim()); setReason(""); setDeferring(null); } }}

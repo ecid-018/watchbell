@@ -25,6 +25,7 @@ export default function TodayView({
     fontFamily: F.ui, fontSize: 14, color: C.text,
     background: C.card, border: `1px solid ${C.line2}`,
     height: 38, WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
+    minWidth: 0,
   };
 
   const groups = groupByAssignee(jobs, ranks, todayKey);

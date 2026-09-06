@@ -38,7 +38,7 @@ import { pscReadiness } from "./psc.js";
 import { daysToArrival } from "./phase.js";
 import { estimatePhotoBytes, purgeOldPhotos } from "./photodb.js";
 import { buildPhotoZip } from "./photozip.js";
-import { mergeRead, mergeReflect, recoveryCandidates } from "./recovery.js";
+import { fileCandidate, mergeRead, mergeReflect, recoveryCandidates } from "./recovery.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
   isWindowSuspended, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
@@ -111,6 +111,16 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       setReflect((r) => mergeReflect(r, c.reflect));
       setRead((r) => mergeRead(r, c.read));
     }
+  };
+
+  // The same recovery, from a backup file the engineer still has off the
+  // device. Sized up first and applied only on a second tap, because the
+  // whole point of not using Import here is that nothing happens by
+  // surprise. Throws on a file that is not a Watchbell backup.
+  const inspectJournalFile = (backup) => fileCandidate(backup, reflect);
+  const mergeJournalFile = (candidate) => {
+    setReflect((r) => mergeReflect(r, candidate.reflect));
+    setRead((r) => mergeRead(r, candidate.read));
   };
 
   // Fasting: the ramp's anchor date and any manual stage pin, plus the
@@ -841,6 +851,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       fontFamily: F.mono, fontSize: 16, color: C.text, height: 44,
       background: C.sub, border: `1px solid ${C.line2}`,
       WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
+      minWidth: 0,
     };
     return (
       <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
@@ -857,17 +868,17 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           ))}
         </div>
         <div className="flex gap-2 mt-3">
-          <div className="flex-[1.3]">
+          <div className="flex-[1.3] min-w-0">
             <div style={eyebrow}>DATE</div>
             <input type="date" value={d.date} onChange={(e) => setD({ ...d, date: e.target.value })}
               className="wb-t w-full rounded-xl mt-1 px-3" style={fld} />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div style={eyebrow}>START</div>
             <input type="time" value={d.start} onChange={(e) => setD({ ...d, start: e.target.value })}
               className="wb-t w-full rounded-xl mt-1 px-3" style={fld} />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div style={eyebrow}>HOURS</div>
             <input type="number" inputMode="decimal" min="0.5" step="0.5" value={d.hours}
               onChange={(e) => setD({ ...d, hours: e.target.value })}
@@ -1375,7 +1386,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           }} className="flex gap-2 mt-2">
             <input name="rank" type="text" placeholder="Add a rank" autoCapitalize="characters" autoCorrect="off"
               className="wb-t flex-1 rounded-xl px-3" style={{
-                fontFamily: F.ui, fontSize: 16, color: C.text, height: 40,
+                fontFamily: F.ui, fontSize: 16, color: C.text, height: 40, minWidth: 0,
                 background: C.card, border: `1px solid ${C.line2}`,
               }} />
             <button type="submit" className="wb-t rounded-xl px-4"
@@ -1565,7 +1576,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               quota={quota}
               reportProfile={reportProfile} onSetReportProfile={setReportProfile}
               photoBytes={photoBytes} onPurgePhotos={purgePhotos} onExportPhotos={exportPhotos}
-              journalRecovery={journalRecovery} onRecoverReflections={recoverReflections} />
+              journalRecovery={journalRecovery} onRecoverReflections={recoverReflections}
+              onInspectJournalFile={inspectJournalFile} onMergeJournalFile={mergeJournalFile} />
           )}
         </Suspense>
         {tab === "score" && scoreTab()}

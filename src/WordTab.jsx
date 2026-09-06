@@ -283,7 +283,7 @@ export default function WordTab({
     <div className="flex gap-2 mb-3">
       <select value={browse?.book || ""} onChange={(e) => onBrowse(e.target.value ? { book: e.target.value, chapter: 1 } : null)}
         className="wb-t flex-[1.6] rounded-xl px-2" style={{
-          fontFamily: F.ui, fontSize: 15, color: C.text, height: 40,
+          fontFamily: F.ui, fontSize: 15, color: C.text, height: 40, minWidth: 0,
           background: C.sub, border: `1px solid ${C.line2}`, colorScheme: dark ? "dark" : "light",
         }}>
         <option value="">Today's reading</option>
@@ -292,7 +292,7 @@ export default function WordTab({
       {browse && (
         <select value={browse.chapter} onChange={(e) => onBrowse({ ...browse, chapter: Number(e.target.value) })}
           className="wb-t flex-1 rounded-xl px-2" style={{
-            fontFamily: F.mono, fontSize: 15, color: C.text, height: 40,
+            fontFamily: F.mono, fontSize: 15, color: C.text, height: 40, minWidth: 0,
             background: C.sub, border: `1px solid ${C.line2}`, colorScheme: dark ? "dark" : "light",
           }}>
           {Array.from({ length: books.find((b) => b.id === browse.book)?.numberOfChapters || 1 },

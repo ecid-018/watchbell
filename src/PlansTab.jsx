@@ -19,7 +19,7 @@ export const STATUSES = [["planned", "Planned"], ["active", "In progress"], ["do
 export default function PlansTab({
   C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportFallback, onImport, quota,
   reportProfile, onSetReportProfile, photoBytes, onPurgePhotos, onExportPhotos,
-  journalRecovery, onRecoverReflections,
+  journalRecovery, onRecoverReflections, onInspectJournalFile, onMergeJournalFile,
 }) {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(null);
@@ -28,6 +28,10 @@ export default function PlansTab({
   const [importError, setImportError] = useState("");
   const [exportingPhotos, setExportingPhotos] = useState(false);
   const [photoExportUrl, setPhotoExportUrl] = useState(null);
+  const [merging, setMerging] = useState(false);
+  const [mergeCandidate, setMergeCandidate] = useState(null);
+  const [mergeError, setMergeError] = useState("");
+  const [mergeDone, setMergeDone] = useState(null);
   const [purgeArmed, setPurgeArmed] = useState(false);
   const [purging, setPurging] = useState(false);
   const [purgeResult, setPurgeResult] = useState(null);
@@ -37,6 +41,7 @@ export default function PlansTab({
     fontFamily: F.ui, fontSize: 16, color: C.text, height: 46,
     background: C.sub, border: `1px solid ${C.line2}`,
     WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
+    minWidth: 0,
   };
 
   const todayKey = dateKey(today);
@@ -106,6 +111,31 @@ export default function PlansTab({
     setPurging(false);
     setPurgeArmed(false);
   };
+
+  // Read the file and size it up. Nothing is written until the engineer
+  // has seen the number and tapped again.
+  const handleJournalFile = (e) => {
+    const file = e.target.files[0];
+    // The value stays put, so the control keeps showing which file was read
+    // alongside the count it produced. The card unmounts when it closes, so
+    // the next open starts from an empty input anyway.
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const candidate = onInspectJournalFile(JSON.parse(evt.target.result));
+        setMergeError("");
+        setMergeCandidate({ ...candidate, label: file.name });
+      } catch (err) {
+        setMergeCandidate(null);
+        setMergeError("Could not read that file: " + err.message);
+      }
+    };
+    reader.onerror = () => setMergeError("Could not read that file.");
+    reader.readAsText(file);
+  };
+
+  const closeMerge = () => { setMerging(false); setMergeCandidate(null); setMergeError(""); };
 
   const handleImport = (e) => {
     const file = e.target.files[0];
@@ -187,6 +217,53 @@ export default function PlansTab({
               style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.line2}` }}>
               Export everything to JSON
             </button>
+            {merging ? (
+              <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+                <div style={eyebrow}>MERGE JOURNAL FROM A FILE</div>
+                <div style={{ fontSize: 11.5, lineHeight: 1.5, marginTop: 6, color: C.dim2 }}>
+                  Fills only days your journal is blank on. Nothing you have written is replaced,
+                  and jobs, plans and the vault are not touched at all.
+                </div>
+                <input type="file" accept=".json" onChange={handleJournalFile}
+                  className="wb-t w-full rounded-xl mt-3 px-3" style={{ ...field, fontFamily: F.mono }} />
+                {mergeError && <div style={{ color: C.oxide, marginTop: 8, fontSize: 13 }}>{mergeError}</div>}
+                {mergeCandidate && (
+                  <div style={{ fontSize: 13, lineHeight: 1.45, marginTop: 10, color: C.text }}>
+                    {mergeCandidate.gaps.length === 0
+                      ? "Nothing to recover — that file has no days your journal is missing."
+                      : `${mergeCandidate.gaps.length} day${mergeCandidate.gaps.length === 1 ? "" : "s"} of reflection in that file that your journal is missing.`}
+                  </div>
+                )}
+                <div className="flex gap-2 mt-4">
+                  <button onClick={closeMerge} className="wb-t flex-1 rounded-xl py-2.5"
+                    style={{ fontSize: 13, fontWeight: 600, color: C.dim, border: `1px solid ${C.line2}` }}>
+                    Cancel
+                  </button>
+                  {mergeCandidate && mergeCandidate.gaps.length > 0 && (
+                    <button
+                      onClick={() => {
+                        onMergeJournalFile(mergeCandidate);
+                        setMergeDone(mergeCandidate.gaps.length);
+                        closeMerge();
+                      }}
+                      className="wb-t flex-1 rounded-xl py-2.5"
+                      style={{ fontSize: 13, fontWeight: 600, background: C.amber, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.amber}` }}>
+                      Fill {mergeCandidate.gaps.length} day{mergeCandidate.gaps.length === 1 ? "" : "s"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => { setMerging(true); setMergeDone(null); }} className="wb-t w-full rounded-xl py-2.5 mb-2"
+                style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.line2}` }}>
+                Merge journal from a backup file
+              </button>
+            )}
+            {mergeDone != null && (
+              <div style={{ fontSize: 12.5, lineHeight: 1.45, color: C.foam, padding: "0 4px 8px" }}>
+                Recovered {mergeDone} day{mergeDone === 1 ? "" : "s"} into the journal.
+              </div>
+            )}
             {importing ? (
               <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
                 <div style={eyebrow}>IMPORT BACKUP</div>
@@ -206,6 +283,11 @@ export default function PlansTab({
                 Import backup from file
               </button>
             )}
+            <div style={{ fontSize: 11.5, lineHeight: 1.5, padding: "0 4px 10px", color: C.dim2 }}>
+              Import replaces, key for key — it is for restoring onto a bare device, not for
+              recovering a few lost days. To bring an old journal home without losing this
+              month, use the merge above.
+            </div>
             <div style={{ fontSize: 11.5, lineHeight: 1.5, padding: "0 4px", color: C.dim2 }}>
               The vault lives on this iPad only. Export before a reinstall — deleting the
               home-screen icon takes it with it.

@@ -7,7 +7,7 @@ import React, { useState } from "react";
 ------------------------------------------------------------------ */
 
 import { F } from "./theme.js";
-import { compressImage } from "./imagepipe.js";
+import { renderPhoto } from "./imagepipe.js";
 import { putPhoto, newPhotoId } from "./photodb.js";
 
 export default function QuickCapture({ C, dark, onClose, onSave }) {
@@ -23,9 +23,7 @@ export default function QuickCapture({ C, dark, onClose, onSave }) {
     setBusy(true);
     setError(null);
     try {
-      const full = await compressImage(file);
-      const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
-      setPhoto({ full, thumb });
+      setPhoto(await renderPhoto(file));
     } catch (err) {
       // The title is still worth saving on its own — only the photo is lost.
       console.warn("Watchbell: could not read that photo.", err);
@@ -41,9 +39,8 @@ export default function QuickCapture({ C, dark, onClose, onSave }) {
     const job = onSave(title.trim());
     if (photo && job) {
       await putPhoto({
-        id: newPhotoId(), jobId: job.id, blob: photo.full.blob, thumbBlob: photo.thumb.blob,
+        id: newPhotoId(), jobId: job.id, ...photo,
         tag: "after", capturedAt: new Date().toISOString(), exifDate: null, source: "camera",
-        width: photo.full.width, height: photo.full.height, bytes: photo.full.blob.size,
       });
     }
     onClose();

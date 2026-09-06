@@ -63,7 +63,7 @@ async function photoFigures(jobId) {
   // than taking the whole report down with it — the tables are the report,
   // and one unreadable JPEG is not a reason to hand back nothing.
   const withUrls = await Promise.all(photos.map(async (p) => {
-    try { return { ...p, url: await blobToDataUrl(p.blob) }; }
+    try { return { ...p, url: await blobToDataUrl(p.image) }; }
     catch (e) { console.warn("Watchbell: leaving an unreadable photo out of the report.", e); return null; }
   }));
   return withUrls.filter(Boolean).sort((a, b) => (a.tag === b.tag ? 0 : a.tag === "before" ? -1 : 1));

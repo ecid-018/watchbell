@@ -66,6 +66,37 @@ export async function compressImage(source, { maxEdge = MAX_EDGE, quality = QUAL
   return { blob, width: w, height: h };
 }
 
+/* The two renditions the app keeps of every photo.
+
+   One working image, not an archive copy plus a display copy: a 1400px
+   long edge at 0.6 is still clear enough to read a nameplate or see where
+   the oil is coming from, it is what a report figure prints from, and it
+   is roughly half the storage of the 1600px/0.7 it replaces. The thumbnail
+   is for the strip only — too small to judge anything by, which is why the
+   viewer never falls back to it while the working image can still be read. */
+const VIEW = { maxEdge: 1400, quality: 0.6 };
+const THUMB = { maxEdge: 240, quality: 0.5 };
+
+/** A camera or library file, worked up into the record the photo store
+    holds. Bytes, not Blobs: a Blob in IndexedDB is a reference to a file
+    the browser keeps elsewhere, and on iOS that file has been seen to go
+    away underneath a record that still reads back perfectly otherwise —
+    the metadata intact, `size` still right, and not one byte readable. An
+    ArrayBuffer is cloned into the record itself, so there is no second
+    thing left to lose. */
+export async function renderPhoto(source) {
+  const image = await compressImage(source, VIEW);
+  const thumb = await compressImage(image.blob, THUMB);
+  return {
+    imageBytes: await image.blob.arrayBuffer(),
+    thumbBytes: await thumb.blob.arrayBuffer(),
+    type: "image/jpeg",
+    width: image.width,
+    height: image.height,
+    bytes: image.blob.size + thumb.blob.size,
+  };
+}
+
 /** The same bytes as a data URL. A third larger than an object URL and it
     copies rather than referencing, but it is inert: nothing can revoke it
     or collect it out from under an <img>. */

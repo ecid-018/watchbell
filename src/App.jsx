@@ -13,6 +13,7 @@ import Watchbell from "./Watchbell.jsx";
 import { K, readJSON, writeJSON, writeAutoBackup } from "./storage.js";
 import { appendPhase, arrivalUTCOf, currentPhase, endpointsOf, migrate, replaceCurrent } from "./phase.js";
 import { exportAll, migrateStores } from "./store.js";
+import { repairLegacyPhotos } from "./photodb.js";
 import { importBacklog } from "./backlog.js";
 import { dateKey } from "./voyage.js";
 
@@ -29,6 +30,9 @@ export default function App() {
   // One backup a day, taken once storage is known to be up to schema.
   useEffect(() => {
     writeAutoBackup(exportAll());
+    // Photos stored the old way depend on a file the browser may yet drop.
+    // Any that can still be read are rewritten into the record itself.
+    repairLegacyPhotos();
   }, []);
 
   const phase = currentPhase(phases);

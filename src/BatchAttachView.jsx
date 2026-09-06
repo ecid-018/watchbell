@@ -8,7 +8,7 @@ import React, { useEffect, useState } from "react";
 ------------------------------------------------------------------ */
 
 import { F } from "./theme.js";
-import { compressImage } from "./imagepipe.js";
+import { renderPhoto } from "./imagepipe.js";
 import { readExifDate } from "./exif.js";
 import { getUnassignedPhotos, photoCountsByJob, putPhoto, newPhotoId, updatePhoto } from "./photodb.js";
 import PhotoImage from "./PhotoImage.jsx";
@@ -36,13 +36,10 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
     try {
       for (const file of files) {
         const exifDate = await file.arrayBuffer().then(readExifDate).catch(() => null);
-        const full = await compressImage(file);
-        const thumb = await compressImage(full.blob, { maxEdge: 240, quality: 0.5 });
         await putPhoto({
-          id: newPhotoId(), jobId: "", blob: full.blob, thumbBlob: thumb.blob,
+          id: newPhotoId(), jobId: "", ...(await renderPhoto(file)),
           tag: "after", capturedAt: (exifDate || new Date()).toISOString(),
           exifDate: exifDate ? exifDate.toISOString() : null, source: "library",
-          width: full.width, height: full.height, bytes: full.blob.size,
         });
       }
     } catch (e) {
@@ -102,7 +99,7 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
               className="wb-t w-full rounded-lg overflow-hidden" style={{
                 aspectRatio: "1", border: `2px solid ${selected === p.id ? C.amber : C.line2}`,
               }}>
-              <PhotoImage blob={p.thumbBlob || p.blob} C={C} compact
+              <PhotoImage sources={[p.thumb, p.image]} C={C} compact
                 style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </button>
             <button onClick={() => skip(p.id)} className="wb-t absolute rounded-full flex items-center justify-center"
@@ -141,7 +138,7 @@ export default function BatchAttachView({ C, dark, wide, jobs }) {
           {showSkipped && skipped.map((p) => (
             <div key={p.id} className="flex items-center gap-3 py-1.5 px-2">
               <div className="rounded-lg overflow-hidden shrink-0" style={{ width: 36, height: 36 }}>
-                <PhotoImage blob={p.thumbBlob || p.blob} C={C} compact
+                <PhotoImage sources={[p.thumb, p.image]} C={C} compact
                   style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
               <span className="flex-1" style={{ fontSize: 12, color: C.dim }}>

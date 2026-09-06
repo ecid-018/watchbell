@@ -9,7 +9,7 @@ import React, { useRef, useState } from "react";
 import { F } from "./theme.js";
 import PhotoImage from "./PhotoImage.jsx";
 
-function ZoomImage({ C, blob }) {
+function ZoomImage({ C, photo, onDegraded }) {
   const [xform, setXform] = useState({ scale: 1, x: 0, y: 0 });
   const gesture = useRef(null);
 
@@ -37,7 +37,7 @@ function ZoomImage({ C, blob }) {
   return (
     <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={() => { gesture.current = null; }} onDoubleClick={reset}
       style={{ flex: 1, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none" }}>
-      <PhotoImage blob={blob} C={C} style={{
+      <PhotoImage sources={[photo.image, photo.thumb]} C={C} onDegraded={onDegraded} style={{
         maxWidth: "100%", maxHeight: "100%",
         transform: `translate(${xform.x}px, ${xform.y}px) scale(${xform.scale})`,
         transition: gesture.current ? "none" : "transform .15s ease",
@@ -48,6 +48,7 @@ function ZoomImage({ C, blob }) {
 
 export default function PhotoViewer({ C, dark, photos, activeId, onClose, onTag, onDelete }) {
   const [id, setId] = useState(activeId);
+  const [degraded, setDegraded] = useState(false);
   const idx = photos.findIndex((p) => p.id === id);
   const photo = photos[idx];
   if (!photo) return null;
@@ -60,11 +61,12 @@ export default function PhotoViewer({ C, dark, photos, activeId, onClose, onTag,
         <span style={eyebrow}>
           {idx + 1} OF {photos.length} · {photo.source === "library" ? "LIBRARY" : "CAMERA"}
           {photo.exifDate ? ` · ${new Date(photo.exifDate).toLocaleDateString()}` : ""}
+          {degraded ? " · THUMBNAIL ONLY" : ""}
         </span>
         <button onClick={onClose} style={{ color: "#E9F0EF", fontSize: 22, lineHeight: 1 }} aria-label="Close">×</button>
       </div>
 
-      <ZoomImage key={photo.id} C={C} blob={photo.blob} />
+      <ZoomImage key={photo.id} C={C} photo={photo} onDegraded={setDegraded} />
 
       <div className="px-4 pb-4 pt-2 flex items-center gap-2">
         {["before", "after"].map((t) => (

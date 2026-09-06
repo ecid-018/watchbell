@@ -84,9 +84,13 @@ export async function buildPhotoZip(jobs) {
   for (const p of photos) {
     const job = p.jobId && byId.get(p.jobId);
     const folder = job ? `${safeName(job.id, "job")}-${safeName(job.title, "job")}` : "unfiled";
+    // A photo whose bytes cannot be read is left out rather than taking the
+    // whole export down — the rest of the evidence still has to get ashore.
+    let bytes;
+    try { bytes = new Uint8Array(await p.image.arrayBuffer()); }
+    catch (e) { console.warn("Watchbell: leaving an unreadable photo out of the export.", e); continue; }
     const n = (perFolder.get(folder) || 0) + 1;
     perFolder.set(folder, n);
-    const bytes = new Uint8Array(await p.blob.arrayBuffer());
     const suffix = job ? `-${p.tag || "after"}` : "";
     entries.push({ name: `${folder}/${n}${suffix}.jpg`, bytes, date: new Date(p.capturedAt || Date.now()) });
   }

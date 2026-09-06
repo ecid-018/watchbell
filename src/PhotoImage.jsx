@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 
 /* ------------------------------------------------------------------
    Every photo the app puts on screen goes through here, so that one the
@@ -11,8 +11,17 @@ import React from "react";
 import { F } from "./theme.js";
 import { usePhotoSrc } from "./usePhotos.js";
 
-export default function PhotoImage({ blob, C, style, compact = false, alt = "" }) {
-  const { src, failed, onError } = usePhotoSrc(blob);
+export default function PhotoImage({ sources, C, style, compact = false, alt = "", onDegraded }) {
+  const { src, failed, degraded, blob, onError } = usePhotoSrc(sources);
+
+  // Tell the caller when what is on screen is not the rendition it asked
+  // for, so it can label it. Cleared on the way out, so switching photos
+  // does not leave the warning standing over a photo it does not apply to.
+  useEffect(() => {
+    if (!onDegraded) return undefined;
+    onDegraded(degraded);
+    return () => onDegraded(false);
+  }, [degraded, onDegraded]);
 
   if (blob && !failed) {
     return src ? <img src={src} alt={alt} onError={onError} style={style} /> : null;

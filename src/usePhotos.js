@@ -33,29 +33,34 @@ export function usePhotosForJob(jobId) {
 /* ------------------------------------------------------------------
    Getting a stored photo onto the screen.
 
-   An object URL is the cheap route: a handle to bytes the browser already
-   holds, no copy made. It is also the fragile one — the handle is only
-   good for as long as the browser keeps honouring it, and iOS has been
-   seen to serve a broken image back for a URL that rendered fine moments
-   earlier, for every photo at once, without the page ever reloading.
+   Two ladders, tried in order. Across renditions: the working image
+   first, the thumbnail only if that cannot be read — soft and small, but
+   a soft photo of the sounding pipe is still evidence and a "?" is not.
+   Within a rendition: an object URL first, which is a handle to bytes the
+   browser already holds and costs no copy, then a data URL, which is the
+   bytes inline and cannot be revoked out from under an <img>.
 
-   So a failed load is not the end of the road. The <img>'s own error
-   escalates to a data URL: the same bytes inline, slower to build and a
-   third larger, but nothing can revoke or collect it out from under the
-   element. Only when that fails too is the photo genuinely unreadable,
-   and the caller is told so plainly — a photo that cannot be read is a
-   fact the engineer needs, not a glyph to puzzle over.
+   Only when every rung is spent is the photo genuinely unreadable, and
+   the caller is told so plainly — a photo that cannot be read is a fact
+   the engineer needs, not a glyph to puzzle over.
 ------------------------------------------------------------------ */
-export function usePhotoSrc(blob) {
-  // Which route this blob is on, remembered alongside the blob it was
-  // decided for, so a different blob starts back at the cheap route
-  // without needing a second pass to reset it.
-  const [chosen, setChosen] = useState({ blob: null, route: "object" });
-  const route = chosen.blob === blob ? chosen.route : "object";
+export function usePhotoSrc(sources) {
+  const list = (Array.isArray(sources) ? sources : [sources]).filter(Boolean);
+  const head = list[0] || null;
+
+  // Where we are on both ladders, remembered alongside the photo it was
+  // decided for, so a different photo starts again at the top without
+  // needing a second pass to reset it.
+  const [attempt, setAttempt] = useState({ head: null, index: 0, route: "object" });
+  const current = attempt.head === head ? attempt : { index: 0, route: "object" };
+  const blob = list[current.index] || null;
+  const failed = !blob || current.route === "failed";
+
   const [src, setSrc] = useState(null);
   // The src an error has already been counted for, so that two error
-  // events for one load do not skip a rung of the ladder.
+  // events for one load do not skip a rung.
   const reported = useRef(null);
+  const route = current.route;
 
   useEffect(() => {
     if (!blob || route === "failed") { setSrc(null); return; }
@@ -71,7 +76,7 @@ export function usePhotoSrc(blob) {
     let live = true;
     blobToDataUrl(blob).then(
       (dataUrl) => { if (live) setSrc(dataUrl); },
-      () => { if (live) setChosen({ blob, route: "failed" }); },
+      () => { if (live) setAttempt(step(head, list, current)); },
     );
     return () => { live = false; };
   }, [blob, route]);
@@ -80,8 +85,18 @@ export function usePhotoSrc(blob) {
     const bad = e && e.currentTarget ? e.currentTarget.getAttribute("src") : null;
     if (bad && reported.current === bad) return;
     reported.current = bad;
-    setChosen((c) => ({ blob, route: c.blob === blob && c.route === "data" ? "failed" : "data" }));
-  }, [blob]);
+    setAttempt(step(head, list, current));
+  }, [head, list.length, current.index, current.route]);
 
-  return { src, failed: route === "failed", onError };
+  // Showing a rendition we did not intend to show — the caller has to be
+  // able to say so, rather than let a soft thumbnail pass for the photo.
+  return { src, failed, degraded: current.index > 0 && !failed, blob: head, onError };
+}
+
+/** One rung down: a data URL for the same rendition, else the top of the
+    next rendition, else out of road. */
+function step(head, list, at) {
+  if (at.route === "object") return { head, index: at.index, route: "data" };
+  if (at.index + 1 < list.length) return { head, index: at.index + 1, route: "object" };
+  return { head, index: at.index, route: "failed" };
 }

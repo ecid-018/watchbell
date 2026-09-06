@@ -14,6 +14,16 @@
    Every call is wrapped the way bible.js wraps the Cache API: private
    browsing, a browser with IndexedDB disabled, or a device under storage
    pressure should degrade to "no photos" rather than white-screen the app.
+
+   Images are held as ArrayBuffers rather than Blobs. A Blob put into
+   IndexedDB is stored as a reference to a file the browser keeps
+   elsewhere, and on iOS that file has been seen to go away underneath a
+   record that still reads back perfectly otherwise — every field intact,
+   `size` still reporting the right number, and not one byte readable. An
+   ArrayBuffer is structured-cloned into the record itself, so the bytes
+   live or die with the record and there is no second thing to lose.
+   Records written the old way are still read, and repaired in place where
+   their Blobs can still be read at all.
 ------------------------------------------------------------------ */
 
 import { daysBetween, parseKey } from "./voyage.js";
@@ -76,16 +86,34 @@ export async function putPhoto(photo) {
   return (await withStore("readwrite", (store) => { store.put(photo); return true; })) === true;
 }
 
+/** Bytes back into something an <img> can take. Wrapping an ArrayBuffer
+    is all this is — the copy has already happened, coming out of the
+    store. Legacy records carry their Blobs directly, so they pass through
+    as they are and stand or fall on their own. */
+const asBlob = (bytes, type) => (bytes ? new Blob([bytes], { type: type || "image/jpeg" }) : null);
+
+const hydrate = (row) => ({
+  ...row,
+  image: asBlob(row.imageBytes, row.type) || row.blob || null,
+  thumb: asBlob(row.thumbBytes, row.type) || row.thumbBlob || null,
+});
+
 async function getAllByIndex(indexValue) {
   const rows = await withStore("readonly", (store) => reqToPromise(store.index("by_job").getAll(indexValue)));
-  return rows || [];
+  return (rows || []).map(hydrate);
 }
 
 export const getPhotosForJob = (jobId) => getAllByIndex(jobId);
 export const getUnassignedPhotos = () => getAllByIndex("");
 
-export async function allPhotos() {
+/** The stored records untouched — for counting and measuring, where
+    building a Blob per photo would be work spent on nothing. */
+async function allRows() {
   return (await withStore("readonly", (store) => reqToPromise(store.getAll()))) || [];
+}
+
+export async function allPhotos() {
+  return (await allRows()).map(hydrate);
 }
 
 export async function deletePhoto(id) {
@@ -110,7 +138,7 @@ export async function updatePhoto(id, patch) {
 /** {jobId: count}, one pass over the whole store — used to badge the
     backlog jobs that still have no photo, without a query per job. */
 export async function photoCountsByJob() {
-  const rows = await allPhotos();
+  const rows = await allRows();
   const counts = {};
   for (const p of rows) {
     if (!p.jobId || p.jobId === "skipped") continue;
@@ -122,8 +150,37 @@ export async function photoCountsByJob() {
 /** Sums the stored byte counts — no blob reads, so this is cheap enough
     to show in Settings on every render. */
 export async function estimatePhotoBytes() {
-  const rows = await allPhotos();
+  const rows = await allRows();
   return rows.reduce((sum, p) => sum + (p.bytes || 0), 0);
+}
+
+/** Rewrites legacy Blob-backed records in the current shape, so that a
+    photo which survived this long stops depending on a file the browser
+    may yet drop. Photos whose Blobs can no longer be read are left exactly
+    where they are: the record is the only remaining evidence the photo was
+    ever taken, and deleting it on the app's own initiative would throw
+    that away too. Returns what it found. */
+export async function repairLegacyPhotos() {
+  const rows = await allRows();
+  const legacy = rows.filter((r) => !r.imageBytes && r.blob);
+  let repaired = 0;
+  let unreadable = 0;
+
+  for (const row of legacy) {
+    try {
+      const imageBytes = await row.blob.arrayBuffer();
+      const thumbBytes = row.thumbBlob ? await row.thumbBlob.arrayBuffer() : null;
+      if (!imageBytes.byteLength) throw new Error("no bytes");
+      const { blob, thumbBlob, ...rest } = row;
+      await putPhoto({ ...rest, imageBytes, thumbBytes, type: blob.type || "image/jpeg" });
+      repaired += 1;
+    } catch (e) {
+      unreadable += 1;
+    }
+  }
+
+  if (legacy.length) console.warn(`Watchbell: photo repair — ${repaired} rewritten, ${unreadable} unreadable.`);
+  return { checked: legacy.length, repaired, unreadable };
 }
 
 /** Deletes every photo attached to a job closed (done or dropped) more
@@ -132,7 +189,7 @@ export async function purgeOldPhotos(jobs, todayKey, days = 90) {
   const cutoff = (closedOn) => closedOn && daysBetween(parseKey(closedOn), parseKey(todayKey)) > days;
   const oldJobIds = new Set(jobs.filter((j) => cutoff(j.doneOn) || cutoff(j.droppedOn)).map((j) => j.id));
   if (!oldJobIds.size) return 0;
-  const rows = await allPhotos();
+  const rows = await allRows();
   const toDelete = rows.filter((p) => oldJobIds.has(p.jobId));
   if (!toDelete.length) return 0;
   await withStore("readwrite", (store) => { for (const p of toDelete) store.delete(p.id); return true; });

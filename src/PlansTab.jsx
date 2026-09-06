@@ -15,12 +15,20 @@ import { dateKey } from "./voyage.js";
 export const SOURCES = ["Office", "Class", "Own", "Superintendent"];
 export const STATUSES = [["planned", "Planned"], ["active", "In progress"], ["done", "Done"]];
 
-export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportFallback, onImport, quota }) {
+export default function PlansTab({
+  C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportFallback, onImport, quota,
+  reportProfile, onSetReportProfile, photoBytes, onPurgePhotos, onExportPhotos,
+}) {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(null);
   const [draft, setDraft] = useState({ title: "", notes: "", target: "", source: "" });
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
+  const [exportingPhotos, setExportingPhotos] = useState(false);
+  const [photoExportUrl, setPhotoExportUrl] = useState(null);
+  const [purgeArmed, setPurgeArmed] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const [purgeResult, setPurgeResult] = useState(null);
 
   const eyebrow = { fontFamily: F.mono, fontSize: 9, letterSpacing: ".12em", color: C.dim2 };
   const field = {
@@ -67,6 +75,33 @@ export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, on
       if (e.name === "AbortError") return; // user cancelled the share sheet
     }
     onExportFallback(json);
+  };
+
+  const handleExportPhotos = async () => {
+    setExportingPhotos(true);
+    try {
+      const blob = await onExportPhotos();
+      const file = new File([blob], `watchbell-photos-${dateKey(new Date())}.zip`, { type: "application/zip" });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Watchbell Photos" });
+      } else {
+        setPhotoExportUrl({ url: URL.createObjectURL(blob), name: file.name, size: blob.size });
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") console.warn("Watchbell: photo export failed.", e);
+    }
+    setExportingPhotos(false);
+  };
+
+  // Two taps — the first arms it, the second actually deletes. The only
+  // genuinely destructive action in the app, so it earns the friction.
+  const handlePurge = async () => {
+    if (!purgeArmed) { setPurgeArmed(true); return; }
+    setPurging(true);
+    const n = await onPurgePhotos();
+    setPurgeResult(n);
+    setPurging(false);
+    setPurgeArmed(false);
   };
 
   const handleImport = (e) => {
@@ -157,6 +192,64 @@ export default function PlansTab({ C, dark, wide, plans, today, onAdd, onSet, on
                 <span style={{ display: "block", marginTop: 4, color: quota.pct > 80 ? C.oxide : C.dim2 }}>
                   Storage: {quota.pct}% used ({Math.round(quota.usage / 1024)} KB of {Math.round(quota.quota / 1024)} KB)
                 </span>
+              )}
+            </div>
+
+            {reportProfile && (
+              <div className="wb-t rounded-2xl p-4 mt-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+                <div style={eyebrow}>REPORT HEADER</div>
+                <input type="text" value={reportProfile.vessel} onChange={(e) => onSetReportProfile({ vessel: e.target.value })}
+                  placeholder="Vessel" className="wb-t w-full rounded-xl mt-2 px-3" style={{ ...field, height: 40, fontSize: 14 }} />
+                <div className="flex gap-2 mt-2">
+                  <input type="text" value={reportProfile.rank} onChange={(e) => onSetReportProfile({ rank: e.target.value })}
+                    placeholder="Rank" className="wb-t flex-1 rounded-xl px-3" style={{ ...field, height: 40, fontSize: 14 }} />
+                  <input type="text" value={reportProfile.name} onChange={(e) => onSetReportProfile({ name: e.target.value })}
+                    placeholder="Name" className="wb-t flex-1 rounded-xl px-3" style={{ ...field, height: 40, fontSize: 14 }} />
+                </div>
+                <div style={{ fontSize: 11, lineHeight: 1.4, marginTop: 6, color: C.dim2 }}>
+                  Carried in the header of every PSC, backlog and period report.
+                </div>
+              </div>
+            )}
+
+            <div className="wb-t rounded-2xl p-4 mt-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
+              <div style={eyebrow}>PHOTOS</div>
+              <div style={{ fontSize: 12, marginTop: 4, color: C.text2 }}>
+                {photoBytes == null ? "—" : `${(photoBytes / 1024 / 1024).toFixed(1)} MB stored`}
+              </div>
+              <button onClick={handleExportPhotos} disabled={exportingPhotos} className="wb-t w-full rounded-xl mt-3 py-2.5"
+                style={{ fontSize: 12.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+                {exportingPhotos ? "Building…" : "Export photos"}
+              </button>
+              {photoExportUrl && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11.5, lineHeight: 1.4, marginBottom: 6, color: C.dim2 }}>
+                    {(photoExportUrl.size / 1024 / 1024).toFixed(1)} MB. Sharing isn't available here.
+                  </div>
+                  <a href={photoExportUrl.url} download={photoExportUrl.name}
+                    className="wb-t w-full block text-center rounded-xl py-2" style={{ fontSize: 12.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+                    Save the zip
+                  </a>
+                </div>
+              )}
+              <button onClick={handlePurge} disabled={purging} className="wb-t w-full rounded-xl mt-2 py-2.5"
+                style={{
+                  fontSize: 12.5, fontWeight: 600,
+                  color: purgeArmed ? (dark ? "#0E1C22" : "#FFFFFF") : C.oxide,
+                  background: purgeArmed ? C.oxide : "transparent",
+                  border: `1px solid ${C.oxide}`,
+                }}>
+                {purging ? "Purging…" : purgeArmed ? "Tap again to delete — closed 90+ days ago" : "Purge photos on jobs closed over 90 days"}
+              </button>
+              {purgeArmed && (
+                <button onClick={() => setPurgeArmed(false)} className="wb-t w-full mt-2" style={{ fontSize: 11.5, color: C.dim }}>
+                  Cancel
+                </button>
+              )}
+              {purgeResult !== null && (
+                <div style={{ fontSize: 11.5, marginTop: 6, color: C.dim2 }}>
+                  {purgeResult === 0 ? "Nothing old enough to purge." : `${purgeResult} photo${purgeResult === 1 ? "" : "s"} removed.`}
+                </div>
               )}
             </div>
           </>

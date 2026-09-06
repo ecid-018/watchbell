@@ -43,7 +43,20 @@ export const carryLabel = (n) => {
 export const isOpen = (j) => j.status === "open";
 export const isArchived = (j) => j.status === "dropped";
 
-/** Today's list, urgent first, then longest-carried, grouped by rank. */
+/** Lower sorts first. PSC and defect items lead every list they appear
+    in — they are the ones written up as deficiencies at arrival. */
+export const PRIORITY_RANK = { psc: 0, defect: 1, urgent: 2, normal: 3 };
+
+/** PSC and defect items cannot be dropped, only done or deferred with a
+    reason — everything else can be dropped freely. */
+export const canDrop = (j) => j.priority !== "psc" && j.priority !== "defect";
+
+/** A photo's default before/after tag: still in the pool is "before" the
+    work, anything else (open, done) is "after" — correctable with one tap
+    since a quick-captured job (born open, never pooled) has no "before". */
+export const autoPhotoTag = (job) => (job.status === "pooled" ? "before" : "after");
+
+/** Today's list, PSC/defect first, then urgent, then longest-carried, grouped by rank. */
 export function groupByAssignee(jobs, ranks, todayKey) {
   const open = jobs.filter(isOpen);
   const order = new Map(ranks.map((r, i) => [r, i]));
@@ -54,7 +67,7 @@ export function groupByAssignee(jobs, ranks, todayKey) {
   }
   for (const list of groups.values()) {
     list.sort((a, b) =>
-      (a.priority === b.priority ? 0 : a.priority === "urgent" ? -1 : 1) ||
+      (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
       carriedFor(b, todayKey) - carriedFor(a, todayKey) ||
       a.title.localeCompare(b.title));
   }

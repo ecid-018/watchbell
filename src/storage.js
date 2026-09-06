@@ -34,6 +34,8 @@ export const K = {
   prolongedFast: "watchbell:fasting:prolonged",
   prolongedFastLog: "watchbell:fasting:prolongedLog",
   utcOverride: "watchbell:utcOverride",
+  pscDeferrals: "watchbell:jobs:pscDeferrals",
+  reportProfile: "watchbell:reportProfile",
   // Pre-phases format. Still read on first launch after an update so an
   // existing passage survives, and still written so a rollback finds it.
   start: "watchbell:voyageStart",
@@ -83,6 +85,16 @@ export function crc32(str) {
   let crc = 0xffffffff;
   for (let i = 0; i < str.length; i++) {
     crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ str.charCodeAt(i)) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** The same table and walk, over raw bytes rather than a JSON string —
+    what the photo ZIP writer needs, since a photo blob isn't JSON. */
+export function crc32Bytes(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
@@ -187,19 +199,42 @@ function recoverFromWAL(key, fallbackValue) {
   return memory.has(key) ? memory.get(key) : fallbackValue;
 }
 
-/** Replay WAL on startup to catch any half-written entries */
+/** Does the key's own on-disk value already read back cleanly? Checked
+    directly against localStorage (not readJSON) so this can't recurse into
+    readJSON's own WAL-recovery path. */
+function readsCleanly(key) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return false;
+    const parsed = JSON.parse(raw);
+    if (!(parsed && typeof parsed === "object" && "v" in parsed)) return true; // old, unchecksummed format
+    return parsed.crc === undefined || parsed.crc === crc32(JSON.stringify(parsed.v));
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Replay WAL on startup to catch any half-written entries — a write that
+    reached the log but not the key it was meant for, because the app was
+    killed in between. Only the most recent WAL entry per key is a
+    candidate (the log holds one row per write, so the same key can appear
+    many times), and only when that key's current value is actually
+    missing or corrupt: a key that already reads back cleanly is left
+    alone, rather than being overwritten with whatever the log happened to
+    hold for it. */
 export function replayWAL() {
   try {
     const wal = readJSON(K.wal, []);
-    for (const entry of wal) {
-      if (!memory.has(entry.key)) {
-        const expectedCrc = crc32(JSON.stringify(entry.value));
-        if (entry.crc === expectedCrc) {
-          memory.set(entry.key, entry.value);
-          try {
-            window.localStorage.setItem(entry.key, JSON.stringify({ v: entry.value, crc: entry.crc, ts: entry.ts }));
-          } catch (_) { /* ignore */ }
-        }
+    const latestPerKey = new Map();
+    for (const entry of wal) latestPerKey.set(entry.key, entry); // chronological — last write wins
+    for (const entry of latestPerKey.values()) {
+      if (memory.has(entry.key) || readsCleanly(entry.key)) continue;
+      const expectedCrc = crc32(JSON.stringify(entry.value));
+      if (entry.crc === expectedCrc) {
+        memory.set(entry.key, entry.value);
+        try {
+          window.localStorage.setItem(entry.key, JSON.stringify({ v: entry.value, crc: entry.crc, ts: entry.ts }));
+        } catch (_) { /* ignore */ }
       }
     }
   } catch (_) { /* ignore */ }

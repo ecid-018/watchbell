@@ -16,7 +16,13 @@ import { F } from "./theme.js";
 import { addDays, dateKey, mondayOf, parseKey, prettyDate } from "./voyage.js";
 import { readLog } from "./storage.js";
 import { ADMIN } from "./data/admin-tasks.js";
+import { BACKLOG } from "./data/jobs-backlog.js";
 import { criticalCarriedInWeek } from "./admin.js";
+import { recurringTasksFromBacklog } from "./backlog.js";
+
+// Weekly backlog items (S03/S04) ride the admin cadence engine too, so the
+// carried-critical lookup here needs to know their titles as well as ADMIN's.
+const TASKS = [...ADMIN, ...recurringTasksFromBacklog(BACKLOG)];
 
 const blank = () => ({ review: "", plan: "", priorities: [{ text: "", done: false }, { text: "", done: false }, { text: "", done: false }] });
 
@@ -31,7 +37,7 @@ export default function WeekTab({ C, dark, wide, weeks, today, onSet, figures })
   const prev = weeks[prevKey];
   const current = offset === 0;
   const carried = useMemo(
-    () => criticalCarriedInWeek(ADMIN, monday, addDays(monday, 6), readLog),
+    () => criticalCarriedInWeek(TASKS, monday, addDays(monday, 6), readLog),
     [key],
   );
 

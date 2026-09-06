@@ -13,9 +13,13 @@ import Watchbell from "./Watchbell.jsx";
 import { K, readJSON, writeJSON, writeAutoBackup } from "./storage.js";
 import { appendPhase, arrivalUTCOf, currentPhase, endpointsOf, migrate, replaceCurrent } from "./phase.js";
 import { exportAll, migrateStores } from "./store.js";
+import { importBacklog } from "./backlog.js";
+import { dateKey } from "./voyage.js";
 
 // Storage is brought up to the current schema before anything reads it.
 migrateStores();
+// Idempotent: adds any backlog item not already on the jobs list, by id.
+importBacklog(dateKey(new Date()));
 
 export default function App() {
   const [phases, setPhases] = useState(() => migrate(readJSON(K.phases, null), readJSON(K.start, null)));

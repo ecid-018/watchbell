@@ -31,7 +31,13 @@ import { jobsInWindow, makeJob } from "./jobs.js";
 import { DEFAULT_RANKS, exportAll, importAll, loadStore, newId, saveStore } from "./store.js";
 import { allRefs, countCached, fetchInto, listBooks, parseRef } from "./bible.js";
 import { ADMIN, SLOTS } from "./data/admin-tasks.js";
+import { BACKLOG } from "./data/jobs-backlog.js";
 import { adminToday, dueTriggers, slotSummary, taskStatus } from "./admin.js";
+import { pscPinned, recurringTasksFromBacklog } from "./backlog.js";
+import { pscReadiness } from "./psc.js";
+import { daysToArrival } from "./phase.js";
+import { estimatePhotoBytes, purgeOldPhotos } from "./photodb.js";
+import { buildPhotoZip } from "./photozip.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
   isWindowSuspended, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
@@ -85,6 +91,14 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [openAdminSlot, setOpenAdminSlot] = useState(null); // "am" | "pm" | null
   const [openAdminTask, setOpenAdminTask] = useState(null); // task key
   const [vaultOffer, setVaultOffer] = useState(null); // { title } | null, after a defect/survey task
+
+  // PSC defer-with-reason history, per job id, and the report header — both
+  // small settings-shaped stores, same ad-hoc pattern as fasting/adminDeferred.
+  const [pscDeferrals, setPscDeferrals] = useState(() => readJSON(K.pscDeferrals, {}) || {});
+  const [reportProfile, setReportProfileState] = useState(() => readJSON(K.reportProfile, null) ?? {
+    vessel: "MV Queen Trader", rank: "", name: "",
+  });
+  const [photoBytes, setPhotoBytes] = useState(null);
 
   // Fasting: the ramp's anchor date and any manual stage pin, plus the
   // fasted-training setting. Everything else about today's window — open
@@ -228,16 +242,29 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const trainDue = useMemo(() => sessionsDueInWindow(now), [todayKey]);
   const jobFigure = useMemo(() => jobsInWindow(jobs, now), [jobs, todayKey]);
 
+  // The backlog pool, and the PSC figures that drive the pin and the
+  // Standing tile. `jobs` is the one flat store — "pooled" is just a
+  // status on the same rows Today and the archive already read.
+  const pool = useMemo(() => jobs.filter((j) => j.status === "pooled"), [jobs]);
+  const pscReady = useMemo(() => pscReadiness(jobs), [jobs]);
+  const arrivalDays = useMemo(() => daysToArrival(phase, now), [phase, todayKey]);
+  const pscPinnedIds = useMemo(
+    () => new Set(pscPinned(jobs, phase, now).map((j) => j.id)),
+    [jobs, phase, todayKey],
+  );
+
   // Admin tasks are a calendar fact, not a leg-preview one: they run off
-  // today regardless of which leg is on screen.
+  // today regardless of which leg is on screen. Weekly backlog items
+  // (S03/S04) ride this same cadence engine rather than a second one.
+  const tasks = useMemo(() => [...ADMIN, ...recurringTasksFromBacklog(BACKLOG)], []);
   const adminCtx = useMemo(
     () => ({ today: now, todayKey, completions: adminDone, deferrals: adminDeferred, events }),
     [now, todayKey, adminDone, adminDeferred, events],
   );
-  const amSummary = useMemo(() => slotSummary(ADMIN, "am", adminCtx, SLOTS.am.minutes), [adminCtx]);
-  const pmSummary = useMemo(() => slotSummary(ADMIN, "pm", adminCtx, SLOTS.pm.minutes), [adminCtx]);
-  const triggerTasks = useMemo(() => dueTriggers(ADMIN, adminCtx), [adminCtx]);
-  const adminFigure = useMemo(() => adminToday(ADMIN, adminCtx), [adminCtx]);
+  const amSummary = useMemo(() => slotSummary(tasks, "am", adminCtx, SLOTS.am.minutes), [tasks, adminCtx]);
+  const pmSummary = useMemo(() => slotSummary(tasks, "pm", adminCtx, SLOTS.pm.minutes), [tasks, adminCtx]);
+  const triggerTasks = useMemo(() => dueTriggers(tasks, adminCtx), [tasks, adminCtx]);
+  const adminFigure = useMemo(() => adminToday(tasks, adminCtx), [tasks, adminCtx]);
 
   const prolongedDates = useMemo(
     () => prolongedFastLog.map((f) => f.date).concat(prolongedFast?.date ? [prolongedFast.date] : []),
@@ -262,6 +289,11 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => writeJSON(K.fasting, fasting), [fasting]);
   useEffect(() => writeJSON(K.prolongedFast, prolongedFast), [prolongedFast]);
   useEffect(() => writeJSON(K.prolongedFastLog, prolongedFastLog), [prolongedFastLog]);
+  useEffect(() => writeJSON(K.pscDeferrals, pscDeferrals), [pscDeferrals]);
+  useEffect(() => writeJSON(K.reportProfile, reportProfile), [reportProfile]);
+  // Cheap (byte counts only, no blob reads) but no reason to run it every
+  // tick — refreshed on mount and whenever Plans (where it's shown) opens.
+  useEffect(() => { if (tab === "plans") estimatePhotoBytes().then(setPhotoBytes); }, [tab]);
   useEffect(() => {
     writeJSON(K.utcOverride, utcOverride == null ? null : { phaseStart: phase.start, offset: utcOverride });
   }, [utcOverride, phase.start]);
@@ -280,7 +312,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // the same record purely so the Week tab can read history off the log
   // instead of re-guessing it from today's completions.
   useEffect(() => {
-    const carried = ADMIN.filter((t) => t.critical)
+    const carried = tasks.filter((t) => t.critical)
       .filter((t) => taskStatus(t, adminCtx).carried)
       .map((t) => t.key);
     setDone((d) => {
@@ -289,7 +321,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       if (d["admin-am"] === amSummary.allDone && d["admin-pm"] === pmSummary.allDone && sameCarried) return d;
       return { ...d, "admin-am": amSummary.allDone, "admin-pm": pmSummary.allDone, adminCarriedCritical: carried };
     });
-  }, [amSummary.allDone, pmSummary.allDone, adminCtx]);
+  }, [amSummary.allDone, pmSummary.allDone, adminCtx, tasks]);
 
   // One second, because the clock shows seconds. The heavy figures are memoised
   // on the date key rather than on `now`, so a tick is a repaint and not a
@@ -386,6 +418,41 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   const addJob = (fields) => setJobs((all) => [...all, makeJob(fields, todayKey)]);
   const setJob = (id, patch) => setJobs((all) => all.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+
+  // A pool item keeps its own id across the flip, which is what makes
+  // pushing it back lossless — its photos are keyed by that same id.
+  const pullFromPool = (id) => {
+    const job = jobs.find((j) => j.id === id);
+    if (!job) return;
+    setJob(id, { status: "open", created: todayKey, assignee: job.assignee || ranks[0] || "Self" });
+  };
+  const pushToPool = (id) => setJob(id, { status: "pooled" });
+
+  // A defer is a logged reason, not a state change — the job stays open.
+  const deferPsc = (id, reason) => {
+    const entry = { date: todayKey, reason };
+    setJob(id, { lastDeferral: entry });
+    setPscDeferrals((m) => ({ ...m, [id]: [...(m[id] || []), entry] }));
+  };
+
+  // Quick capture: title and an optional photo, nothing else. The job is
+  // built here (not via setJobs' updater) so its id is available
+  // immediately for the photo write that follows.
+  const quickCapture = (title) => {
+    const job = makeJob({ title, assignee: ranks[0] || "Self", priority: "normal" }, todayKey);
+    setJobs((all) => [...all, job]);
+    return job;
+  };
+
+  const setReportProfile = (patch) => setReportProfileState((p) => ({ ...p, ...patch }));
+
+  const purgePhotos = async () => {
+    const n = await purgeOldPhotos(jobs, todayKey, 90);
+    estimatePhotoBytes().then(setPhotoBytes);
+    return n;
+  };
+
+  const exportPhotos = () => buildPhotoZip(jobs);
 
   const addPlan = (d) => setPlans((all) => [...all, {
     id: newId("plan"), title: d.title.trim(), notes: d.notes || "",
@@ -1235,6 +1302,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             ["Jobs", `${jobFigure.done}/${jobFigure.total || 0}`, `${jobFigure.carried} carried`, C.amber],
             ["Admin", `${adminFigure.done}/${adminFigure.total || 0}`, `${adminFigure.carried} carried`, adminFigure.carried ? C.oxide : C.amber],
             ["Window", windowFigure ? `${windowFigure.hit}/${windowFigure.total}` : "—", "kept this week", C.fuel],
+            ["PSC", pscReady.total ? `${pscReady.closed}/${pscReady.total}` : "—", "readiness",
+              pscReady.total > 0 && pscReady.closed === pscReady.total ? C.foam : C.oxide],
           ].map(([t, v, s, col]) => (
             <div key={t} className="wb-t rounded-2xl p-4" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
               <div style={{ ...eyebrow, letterSpacing: ".1em" }}>{t.toUpperCase()}</div>
@@ -1461,8 +1530,11 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           />
         </div>
         {tab === "jobs" && (
-          <JobsTab C={C} dark={dark} wide={wide} jobs={jobs} ranks={ranks} todayKey={todayKey}
-            onAdd={addJob} onSet={setJob} />
+          <JobsTab C={C} dark={dark} wide={wide} jobs={jobs} pool={pool} ranks={ranks} todayKey={todayKey}
+            events={events} pscPinnedIds={pscPinnedIds} pscDeferrals={pscDeferrals}
+            daysToArrival={arrivalDays} reportProfile={reportProfile}
+            onSet={setJob} onPull={pullFromPool} onPush={pushToPool} onDefer={deferPsc}
+            onQuickCapture={quickCapture} />
         )}
         <Suspense fallback={<div className="py-8 text-center" style={{ fontSize: 13, color: C.dim }}>Loading…</div>}>
           {tab === "word" && wordTab()}
@@ -1477,7 +1549,9 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               onExport={() => JSON.stringify(exportAll(), null, 2)}
               onExportFallback={setExporting}
               onImport={importAll}
-              quota={quota} />
+              quota={quota}
+              reportProfile={reportProfile} onSetReportProfile={setReportProfile}
+              photoBytes={photoBytes} onPurgePhotos={purgePhotos} onExportPhotos={exportPhotos} />
           )}
         </Suspense>
         {tab === "score" && scoreTab()}

@@ -5,6 +5,8 @@ import { migrateStores, SCHEMA, DEFAULT_RANKS, exportAll, importAll } from "../s
 import { K, readJSON, writeJSON, replayWAL, crc32, readSnapshot } from "../src/storage.js";
 import { migrate, appendPhase } from "../src/phase.js";
 import { dateKey, addDays, parseKey } from "../src/voyage.js";
+import { importBacklog } from "../src/backlog.js";
+import { BACKLOG } from "../src/data/jobs-backlog.js";
 
 // Mock localStorage for Node testing
 const mockStorage = new Map();
@@ -90,6 +92,28 @@ async function runTests() {
   mockStorage.delete(K.jobs);
   replayWAL();
   assert("WAL replay recovers missing key", readJSON(K.jobs, null) !== null);
+
+  resetStorage();
+  // Two historical writes to the same key, oldest first — a real write log
+  // always looks like this once a key has been written more than once.
+  // Setup goes straight through mockStorage rather than writeJSON, so the
+  // module's in-memory cache is never touched here, mirroring a fresh page
+  // load where that cache starts empty. The key's on-disk value is already
+  // the newer one — an ordinary, uncorrupted write, nothing to recover.
+  const staleValue = { id: "job-stale" };
+  const staleCrc = crc32(JSON.stringify(staleValue));
+  const freshValue = { id: "job-fresh" };
+  const freshCrc = crc32(JSON.stringify(freshValue));
+  const regressionKey = "test:regression-key";
+  const wal2 = [
+    { key: regressionKey, value: staleValue, ts: 1000, crc: staleCrc },
+    { key: regressionKey, value: freshValue, ts: 2000, crc: freshCrc },
+  ];
+  mockStorage.set(K.wal, JSON.stringify({ v: wal2, crc: crc32(JSON.stringify(wal2)), ts: Date.now() }));
+  mockStorage.set(regressionKey, JSON.stringify({ v: freshValue, crc: freshCrc, ts: 2000 }));
+  replayWAL();
+  const afterReplay = JSON.parse(mockStorage.get(regressionKey)).v;
+  assert("WAL replay never regresses a key to an older logged value", afterReplay.id === "job-fresh");
 
   resetStorage();
   writeJSON(K.jobs, [{ id: "job1", title: "Test" }]);
@@ -178,6 +202,29 @@ async function runTests() {
   const { listAutoBackups } = await import("../src/storage.js");
   const backups = listAutoBackups();
   assert("Auto-backup lists today", backups.includes(today));
+
+  console.log("\n=== Backlog import ===\n");
+
+  resetStorage();
+  writeJSON(K.jobs, []);
+  const nonWeekly = BACKLOG.filter((i) => i.recurring !== "weekly");
+  importBacklog(day1);
+  const afterFirst = readJSON(K.jobs, []);
+  assert("First import adds every non-weekly backlog item", afterFirst.length === nonWeekly.length);
+  assert("A promoted item keeps the notebook's own id", nonWeekly.length > 0 && afterFirst.some((j) => j.id === nonWeekly[0].id));
+  assert("A promoted item starts pooled", afterFirst.every((j) => j.status === "pooled"));
+
+  importBacklog(day1);
+  const afterSecond = readJSON(K.jobs, []);
+  assert("A second import does not duplicate the backlog", afterSecond.length === afterFirst.length);
+
+  resetStorage();
+  writeJSON(K.jobs, [{ id: nonWeekly[0].id, title: "Already pulled to today", status: "open" }]);
+  importBacklog(day1);
+  const afterPartial = readJSON(K.jobs, []);
+  assert("Import never overwrites a job already promoted off the pool",
+    afterPartial.find((j) => j.id === nonWeekly[0].id).status === "open");
+  assert("Import still backfills whatever else is missing", afterPartial.length === nonWeekly.length);
 
   console.log("\n=== Results: " + passed + " passed, " + failed + " failed ===");
   process.exit(failed > 0 ? 1 : 0);

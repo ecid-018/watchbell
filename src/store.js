@@ -70,7 +70,7 @@ export const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${(seq++).
  */
 export function exportAll() {
   const out = { app: "watchbell", schema: SCHEMA, exported: new Date().toISOString(), data: {} };
-  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "figures", "mode", "adminCompletions", "adminDeferrals", "fasting", "prolongedFast", "prolongedFastLog", "utcOverride"]) {
+  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "figures", "mode", "adminCompletions", "adminDeferrals", "fasting", "prolongedFast", "prolongedFastLog", "utcOverride", "pscDeferrals", "reportProfile"]) {
     const v = readJSON(K[name], null);
     if (v !== null) out.data[K[name]] = v;
   }

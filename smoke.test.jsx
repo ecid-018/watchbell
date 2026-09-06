@@ -2,7 +2,7 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import Watchbell from "./src/Watchbell.jsx";
 import Setup from "./src/Setup.jsx";
-import { appendPhase, migrate, generateLegs, nameOf, lengthOf, legsOf } from "./src/phase.js";
+import { appendPhase, migrate, generateLegs, nameOf, lengthOf, legsOf, daysToArrival, daysToArrivalSigned } from "./src/phase.js";
 import BodyTab from "./src/BodyTab.jsx";
 import JobsTab from "./src/JobsTab.jsx";
 import WeekTab from "./src/WeekTab.jsx";
@@ -10,7 +10,11 @@ import PlansTab from "./src/PlansTab.jsx";
 import { THEME } from "./src/theme.js";
 import { doableForLeg, eveningFor, itemsForLeg, parseUtcLabel } from "./src/schedule.js";
 import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
-import { CARRY_WARN, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
+import { CARRY_WARN, PRIORITY_RANK, autoPhotoTag, canDrop, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
+import { isFromBacklog, portItemVisible, pscPinned, recurringTasksFromBacklog } from "./src/backlog.js";
+import { BACKLOG } from "./src/data/jobs-backlog.js";
+import { pscReadiness } from "./src/psc.js";
+import { readExifDate } from "./src/exif.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
 import { allRefs, fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
 import { colourOf, marksIn, quote, toggleMark } from "./src/marks.js";
@@ -19,7 +23,7 @@ import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
 import { adminToday, criticalCarriedInWeek, slotSummary, taskStatus } from "./src/admin.js";
-import { addDays, dateKey } from "./src/voyage.js";
+import { addDays, dateKey, parseKey } from "./src/voyage.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
   isWindowSuspended, naturalStage, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
@@ -266,6 +270,83 @@ t("jobs are counted, never averaged in", (() => {
   const w = jobsInWindow([{ ...j0, status: "done", doneOn: NEW }, j1], new Date(2026, 7, 26));
   return w.done === 1 && typeof w.total === "number" && !("pct" in w);
 })());
+t("PSC and defect lead urgent, which leads normal", (() => {
+  const rank = (p) => PRIORITY_RANK[p];
+  return rank("psc") < rank("defect") && rank("defect") < rank("urgent") && rank("urgent") < rank("normal");
+})());
+t("PSC/defect items sort ahead of urgent in a group", (() => {
+  const psc = { ...j1, priority: "psc", assignee: "2/E" };
+  const groups = groupByAssignee([j0, psc], ["2/E"], NEW);
+  return groups[0][1][0].priority === "psc";
+})());
+t("only PSC and defect items refuse a drop", canDrop({ priority: "psc" }) === false
+  && canDrop({ priority: "defect" }) === false
+  && canDrop({ priority: "urgent" }) === true
+  && canDrop({ priority: "normal" }) === true);
+t("a pooled job's photo defaults to before, everything else to after",
+  autoPhotoTag({ status: "pooled" }) === "before"
+    && autoPhotoTag({ status: "open" }) === "after"
+    && autoPhotoTag({ status: "done" }) === "after");
+
+/* -------- the backlog pool and PSC readiness -------- */
+
+t("importing the backlog twice does not double it", (() => {
+  const once = [];
+  const have1 = new Set(once.map((j) => j.id));
+  const additions1 = BACKLOG.filter((i) => i.recurring !== "weekly" && !have1.has(i.id));
+  const after1 = [...once, ...additions1.map((i) => ({ id: i.id, status: "pooled" }))];
+  const have2 = new Set(after1.map((j) => j.id));
+  const additions2 = BACKLOG.filter((i) => i.recurring !== "weekly" && !have2.has(i.id));
+  return additions1.length > 0 && additions2.length === 0;
+})());
+t("a promoted backlog item keeps the notebook's own id", (() => {
+  const item = BACKLOG.find((i) => i.recurring !== "weekly");
+  return isFromBacklog(item.id) && !isFromBacklog("not-a-real-id");
+})());
+t("weekly recurring items never enter the pool", (() => {
+  const weekly = BACKLOG.filter((i) => i.recurring === "weekly").map((i) => i.id);
+  return weekly.length > 0 && weekly.every((id) => BACKLOG.find((i) => i.id === id).recurring === "weekly");
+})());
+t("recurring backlog items arrive admin-shaped", (() => {
+  const tasks = recurringTasksFromBacklog(BACKLOG);
+  return tasks.length > 0 && tasks.every((t2) => t2.cadence === "weekly" && t2.key.startsWith("backlog:"));
+})());
+t("a port item hides at sea and surfaces on a future Arrival", (() => {
+  const item = { where: "port" };
+  const noEvents = portItemVisible(item, [], "2026-08-26");
+  const futureArrival = portItemVisible(item, [{ type: "Arrival", date: "2026-09-10" }], "2026-08-26");
+  return !noEvents && futureArrival;
+})());
+t("a sea item is always visible regardless of events", portItemVisible({ where: "sea" }, [], "2026-08-26"));
+
+const backlogToday = parseKey(NEW);
+const arrivingSoon = { kind: "voyage", start: dateKey(addDays(backlogToday, -35)), days: 40, utc0: 0, utc1: 0 };
+const arrivingFar = { kind: "voyage", start: dateKey(backlogToday), days: 40, utc0: 0, utc1: 0 };
+const portPhase = { kind: "port", start: dateKey(backlogToday) };
+t("days to arrival counts down and clamps at zero", daysToArrival(arrivingSoon, backlogToday) === 4
+  && daysToArrival(arrivingFar, backlogToday) === 39
+  && daysToArrival(portPhase, backlogToday) === null);
+t("the signed variant goes negative once overrun",
+  daysToArrivalSigned({ kind: "voyage", start: dateKey(addDays(backlogToday, -45)), days: 40, utc0: 0, utc1: 0 }, backlogToday) < 0);
+t("open PSC/defect items pin inside 21 days, pooled ones do not", (() => {
+  const openPsc = { id: "x1", status: "open", priority: "psc" };
+  const pooledDefect = { id: "x2", status: "pooled", priority: "defect" };
+  const pinned = pscPinned([openPsc, pooledDefect], arrivingSoon, backlogToday);
+  return pinned.length === 1 && pinned[0].id === "x1";
+})());
+t("nothing pins outside the 21-day window",
+  pscPinned([{ id: "x1", status: "open", priority: "psc" }], arrivingFar, backlogToday).length === 0);
+t("PSC readiness counts psc and defect together, closed over total", (() => {
+  const r = pscReadiness([
+    { priority: "psc", status: "done" }, { priority: "defect", status: "open" },
+    { priority: "urgent", status: "done" },
+  ]);
+  return r.closed === 1 && r.total === 2;
+})());
+t("EXIF parsing never throws — no Exif segment comes back null",
+  readExifDate(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer) === null);
+t("EXIF parsing never throws — garbage input comes back null",
+  readExifDate(new Uint8Array([1, 2, 3]).buffer) === null);
 
 /* -------- admin cadence -------- */
 
@@ -505,8 +586,12 @@ t("ranks are ranks, not names",          DEFAULT_RANKS[0] === "Self" && DEFAULT_
 
 const TD = THEME.dark;
 const tabRenders = [
-  ["Jobs, empty", <JobsTab C={TD} dark wide={false} jobs={[]} ranks={DEFAULT_RANKS} todayKey={NEW} onAdd={noop} onSet={noop} />],
-  ["Jobs, loaded", <JobsTab C={TD} dark wide jobs={[j0, { ...j1, status: "dropped", droppedOn: NEW }]} ranks={DEFAULT_RANKS} todayKey={NEW} onAdd={noop} onSet={noop} />],
+  ["Jobs, empty", <JobsTab C={TD} dark wide={false} jobs={[]} pool={[]} ranks={DEFAULT_RANKS} todayKey={NEW} events={[]}
+      pscPinnedIds={new Set()} pscDeferrals={{}} daysToArrival={null} reportProfile={{ vessel: "", rank: "", name: "" }}
+      onSet={noop} onPull={noop} onPush={noop} onDefer={noop} onQuickCapture={noop} />],
+  ["Jobs, loaded", <JobsTab C={TD} dark wide jobs={[j0, { ...j1, status: "dropped", droppedOn: NEW }]} pool={[]} ranks={DEFAULT_RANKS} todayKey={NEW} events={[]}
+      pscPinnedIds={new Set()} pscDeferrals={{}} daysToArrival={12} reportProfile={{ vessel: "MV Queen Trader", rank: "C/E", name: "" }}
+      onSet={noop} onPull={noop} onPush={noop} onDefer={noop} onQuickCapture={noop} />],
   ["Week, blank", <WeekTab C={TD} dark wide={false} weeks={{}} today={new Date(2026, 7, 26)} onSet={noop}
       figures={{ habit: 71, trained: 3, due: 6, jobs: { done: 2, total: 5, carried: 3 }, plan: { hit: 4, total: 5 } }} />],
   ["Week, with history", <WeekTab C={TD} dark wide weeks={{ "2026-08-17": { review: "r", plan: "p", priorities: [{ text: "Purifier", done: true }, { text: "", done: false }, { text: "", done: false }] } }}

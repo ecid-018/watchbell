@@ -178,6 +178,15 @@ export const readingDayOf = (phase, day) => (phase.readOffset ?? 1) + day - 1;
 export const isComplete = (phase, date) =>
   phase.kind !== "port" && rawDayOf(phase, date) > lengthOf(phase);
 
+/** Days remaining until this phase's arrival, clamped at 0. Null in port
+    — a port stay has no arrival still to come. */
+export const daysToArrival = (phase, date) =>
+  phase.kind === "port" ? null : Math.max(0, lengthOf(phase) - dayOf(phase, date));
+
+/** Unclamped — negative once the passage has run past its own length. */
+export const daysToArrivalSigned = (phase, date) =>
+  phase.kind === "port" ? null : lengthOf(phase) - rawDayOf(phase, date);
+
 /* -------- the list -------- */
 
 /** The phase covering a date: the last one to have begun by then, or null. */

@@ -2,8 +2,9 @@ import React, { lazy, Suspense, useState } from "react";
 
 /* ------------------------------------------------------------------
    The engine room list, grown up: Today, the Backlog pool, PSC readiness,
-   a batch photo-attach screen, and reports — behind one segmented control,
-   with a single prominent + for quick capture at the machine.
+   the photo evidence, a batch photo-attach screen, and reports — behind one
+   segmented control, with a single prominent + for quick capture at the
+   machine.
 ------------------------------------------------------------------ */
 
 import TodayView from "./TodayView.jsx";
@@ -11,10 +12,16 @@ import QuickCapture from "./QuickCapture.jsx";
 
 const BacklogView = lazy(() => import("./BacklogView.jsx"));
 const PscView = lazy(() => import("./PscView.jsx"));
+const PhotoGallery = lazy(() => import("./PhotoGallery.jsx"));
 const BatchAttachView = lazy(() => import("./BatchAttachView.jsx"));
 const ReportsView = lazy(() => import("./ReportsView.jsx"));
 
-const SEGMENTS = [["today", "Today"], ["backlog", "Backlog"], ["psc", "PSC"], ["photos", "Photos"], ["reports", "Reports"]];
+// "Photos" is where you look at them; "Attach" is the batch pairing job you
+// do once after emptying a camera roll into the app.
+const SEGMENTS = [
+  ["today", "Today"], ["backlog", "Backlog"], ["psc", "PSC"],
+  ["photos", "Photos"], ["attach", "Attach"], ["reports", "Reports"],
+];
 
 export default function JobsTab({
   C, dark, wide, jobs, pool, ranks, todayKey, events,
@@ -57,6 +64,9 @@ export default function JobsTab({
             daysToArrival={daysToArrival} pscDeferrals={pscDeferrals} onSet={onSet} onDefer={onDefer} />
         )}
         {seg === "photos" && (
+          <PhotoGallery C={C} dark={dark} wide={wide} jobs={jobs} />
+        )}
+        {seg === "attach" && (
           <BatchAttachView C={C} dark={dark} wide={wide} jobs={jobs} />
         )}
         {seg === "reports" && (

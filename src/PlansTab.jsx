@@ -11,6 +11,7 @@ import React, { useState } from "react";
 
 import { F } from "./theme.js";
 import { dateKey } from "./voyage.js";
+import { totalGapDays } from "./recovery.js";
 
 export const SOURCES = ["Office", "Class", "Own", "Superintendent"];
 export const STATUSES = [["planned", "Planned"], ["active", "In progress"], ["done", "Done"]];
@@ -18,6 +19,7 @@ export const STATUSES = [["planned", "Planned"], ["active", "In progress"], ["do
 export default function PlansTab({
   C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportFallback, onImport, quota,
   reportProfile, onSetReportProfile, photoBytes, onPurgePhotos, onExportPhotos,
+  journalRecovery, onRecoverReflections,
 }) {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(null);
@@ -38,6 +40,7 @@ export default function PlansTab({
   };
 
   const todayKey = dateKey(today);
+  const totalRecoverable = journalRecovery ? totalGapDays(journalRecovery) : 0;
   const sorted = [...plans].sort((a, b) => {
     const rank = (p) => (p.status === "done" ? 2 : p.status === "active" ? 0 : 1);
     return rank(a) - rank(b) || (a.target || "9999").localeCompare(b.target || "9999");
@@ -123,6 +126,24 @@ export default function PlansTab({
   };
 
   return (
+    <>
+      {journalRecovery && journalRecovery.length > 0 && (
+        <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.oxide}` }}>
+          <div style={{ ...eyebrow, color: C.oxide }}>REFLECTIONS MAY BE RECOVERABLE</div>
+          <div style={{ fontSize: 13, lineHeight: 1.45, marginTop: 4, color: C.text }}>
+            {totalRecoverable} day{totalRecoverable === 1 ? "" : "s"} of reflection text found on this
+            device that your current journal is missing — from {journalRecovery.map((c) => c.label).join(", ")}.
+          </div>
+          <button onClick={onRecoverReflections} className="wb-t w-full rounded-xl mt-3 py-2.5"
+            style={{ fontSize: 13, fontWeight: 600, background: C.oxide, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.oxide}` }}>
+            Recover {totalRecoverable} day{totalRecoverable === 1 ? "" : "s"}
+          </button>
+          <div style={{ fontSize: 11, lineHeight: 1.4, marginTop: 6, color: C.dim2 }}>
+            Only fills days your journal is currently blank on — nothing you've already written is
+            touched or replaced.
+          </div>
+        </div>
+      )}
     <div className={wide ? "grid grid-cols-2 gap-4 items-start" : ""}>
       <div>
         {adding ? (
@@ -311,5 +332,6 @@ export default function PlansTab({
         })}
       </div>
     </div>
+    </>
   );
 }

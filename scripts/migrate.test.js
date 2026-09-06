@@ -2,11 +2,12 @@
 // Run with: node scripts/migrate.test.js
 
 import { migrateStores, SCHEMA, DEFAULT_RANKS, exportAll, importAll } from "../src/store.js";
-import { K, readJSON, writeJSON, replayWAL, crc32, readSnapshot } from "../src/storage.js";
+import { K, readJSON, writeJSON, replayWAL, crc32, readSnapshot, writeAutoBackup } from "../src/storage.js";
 import { migrate, appendPhase } from "../src/phase.js";
 import { dateKey, addDays, parseKey } from "../src/voyage.js";
 import { importBacklog } from "../src/backlog.js";
 import { BACKLOG } from "../src/data/jobs-backlog.js";
+import { mergeReflect, recoveryCandidates } from "../src/recovery.js";
 
 // Mock localStorage for Node testing
 const mockStorage = new Map();
@@ -202,6 +203,30 @@ async function runTests() {
   const { listAutoBackups } = await import("../src/storage.js");
   const backups = listAutoBackups();
   assert("Auto-backup lists today", backups.includes(today));
+
+  console.log("\n=== Reflection recovery ===\n");
+
+  resetStorage();
+  // An earlier test in this file (schema snapshot) leaves the in-process
+  // memory cache holding a snapshot keyed with its own K.reflect value —
+  // resetStorage() only clears the fake localStorage, not that cache, so
+  // it has to be overwritten explicitly for this test's own snapshot
+  // check to start from a clean slate.
+  writeJSON(K.snapshot(SCHEMA), null);
+  const richReflect = { "10": "A full week of reflection.", "11": "Another day's thought." };
+  writeAutoBackup({ app: "watchbell", schema: SCHEMA, data: { [K.reflect]: richReflect, [K.read]: { "10": true, "11": true } } });
+  const currentReflect = { "10": "A full week of reflection.", "11": "" }; // day 11 since gone missing
+  const candidates = recoveryCandidates(currentReflect);
+  assert("A backup with a fuller journal is offered as a recovery candidate", candidates.length === 1);
+  assert("The candidate correctly identifies only the missing day", candidates[0].gaps.length === 1 && candidates[0].gaps[0] === "11");
+  const recoveredReflect = mergeReflect(currentReflect, candidates[0].reflect);
+  assert("Recovery fills the day the journal is missing", recoveredReflect["11"] === "Another day's thought.");
+  assert("Recovery never touches a day already present", recoveredReflect["10"] === "A full week of reflection.");
+
+  resetStorage();
+  writeJSON(K.snapshot(SCHEMA), null);
+  writeAutoBackup({ app: "watchbell", schema: SCHEMA, data: { [K.reflect]: richReflect } });
+  assert("A journal with nothing missing offers no candidates", recoveryCandidates(richReflect).length === 0);
 
   console.log("\n=== Backlog import ===\n");
 

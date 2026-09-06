@@ -38,6 +38,7 @@ import { pscReadiness } from "./psc.js";
 import { daysToArrival } from "./phase.js";
 import { estimatePhotoBytes, purgeOldPhotos } from "./photodb.js";
 import { buildPhotoZip } from "./photozip.js";
+import { mergeRead, mergeReflect, recoveryCandidates } from "./recovery.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
   isWindowSuspended, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
@@ -99,6 +100,18 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     vessel: "MV Queen Trader", rank: "", name: "",
   });
   const [photoBytes, setPhotoBytes] = useState(null);
+
+  // Whatever the last seven days of auto-backup, or the one-time schema
+  // snapshot, still hold that the live journal is currently missing —
+  // recomputed whenever the journal itself changes, so a recovery's own
+  // effect (fewer gaps left) is visible immediately.
+  const journalRecovery = useMemo(() => recoveryCandidates(reflect), [reflect]);
+  const recoverReflections = () => {
+    for (const c of journalRecovery) {
+      setReflect((r) => mergeReflect(r, c.reflect));
+      setRead((r) => mergeRead(r, c.read));
+    }
+  };
 
   // Fasting: the ramp's anchor date and any manual stage pin, plus the
   // fasted-training setting. Everything else about today's window — open
@@ -1551,7 +1564,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               onImport={importAll}
               quota={quota}
               reportProfile={reportProfile} onSetReportProfile={setReportProfile}
-              photoBytes={photoBytes} onPurgePhotos={purgePhotos} onExportPhotos={exportPhotos} />
+              photoBytes={photoBytes} onPurgePhotos={purgePhotos} onExportPhotos={exportPhotos}
+              journalRecovery={journalRecovery} onRecoverReflections={recoverReflections} />
           )}
         </Suspense>
         {tab === "score" && scoreTab()}

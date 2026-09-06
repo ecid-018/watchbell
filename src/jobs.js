@@ -45,7 +45,7 @@ export const isArchived = (j) => j.status === "dropped";
 
 /** Lower sorts first. PSC and defect items lead every list they appear
     in — they are the ones written up as deficiencies at arrival. */
-export const PRIORITY_RANK = { psc: 0, defect: 1, urgent: 2, normal: 3 };
+export const PRIORITY_RANK = { psc: 0, defect: 1, urgent: 2, normal: 3, cosmetic: 4 };
 
 /** PSC and defect items cannot be dropped, only done or deferred with a
     reason — everything else can be dropped freely. */

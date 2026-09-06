@@ -15,6 +15,7 @@ import { isFromBacklog, portItemVisible, pscPinned, recurringTasksFromBacklog } 
 import { BACKLOG } from "./src/data/jobs-backlog.js";
 import { pscReadiness } from "./src/psc.js";
 import { readExifDate } from "./src/exif.js";
+import { mergeRead, mergeReflect, reflectGaps, totalGapDays } from "./src/recovery.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
 import { allRefs, fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
 import { colourOf, marksIn, quote, toggleMark } from "./src/marks.js";
@@ -347,6 +348,23 @@ t("EXIF parsing never throws — no Exif segment comes back null",
   readExifDate(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer) === null);
 t("EXIF parsing never throws — garbage input comes back null",
   readExifDate(new Uint8Array([1, 2, 3]).buffer) === null);
+t("cosmetic sorts last, behind normal", PRIORITY_RANK.cosmetic > PRIORITY_RANK.normal);
+
+/* -------- reflection recovery -------- */
+
+t("a gap is a day the source has text for and the live journal doesn't",
+  (() => {
+    const gaps = reflectGaps({ 1: "kept", 2: "" }, { 1: "old text", 2: "recovered", 3: "also recovered" });
+    return gaps.length === 2 && gaps.includes("2") && gaps.includes("3") && !gaps.includes("1");
+  })());
+t("merging a reflection never overwrites what's already written",
+  mergeReflect({ 1: "kept" }, { 1: "would clobber", 2: "filled in" })[1] === "kept"
+    && mergeReflect({ 1: "kept" }, { 1: "would clobber", 2: "filled in" })[2] === "filled in");
+t("merging read flags only fills blanks, same as reflections",
+  mergeRead({ 1: true }, { 1: false, 2: true })[1] === true
+    && mergeRead({ 1: true }, { 1: false, 2: true })[2] === true);
+t("the headline figure is the union of every candidate's gaps, not a sum",
+  totalGapDays([{ gaps: ["1", "2"] }, { gaps: ["2", "3"] }]) === 3);
 
 /* -------- admin cadence -------- */
 
@@ -609,6 +627,19 @@ const weekLoaded = renderToString(tabRenders[3][1]).replace(/<!--.*?-->/g, "");
 t("last week's three carry forward",     weekLoaded.includes("LAST WEEK&#x27;S THREE") && weekLoaded.includes("Purifier"));
 const plansLoaded = renderToString(tabRenders[5][1]).replace(/<!--.*?-->/g, "");
 t("the vault offers its own backup",     plansLoaded.includes("Export everything to JSON"));
+
+const recoveryFixture = [{ id: "autobackup:2026-08-24", label: "auto-backup, 2026-08-24", reflect: {}, read: {}, gaps: ["3", "4"] }];
+const plansWithRecovery = renderToString(
+  <PlansTab C={TD} dark wide={false} plans={[]} today={new Date(2026, 7, 26)} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop}
+    journalRecovery={recoveryFixture} onRecoverReflections={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("a recoverable journal surfaces its own banner in Plans",
+  plansWithRecovery.includes("REFLECTIONS MAY BE RECOVERABLE") && plansWithRecovery.includes("Recover 2 days"));
+const plansNoRecovery = renderToString(
+  <PlansTab C={TD} dark wide={false} plans={[]} today={new Date(2026, 7, 26)} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop}
+    journalRecovery={[]} onRecoverReflections={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("nothing to recover means no banner", !plansNoRecovery.includes("REFLECTIONS MAY BE RECOVERABLE"));
 
 /* -------- evening prayer is non-negotiable too -------- */
 

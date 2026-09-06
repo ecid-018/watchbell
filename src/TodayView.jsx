@@ -81,7 +81,7 @@ export default function TodayView({
               ))}
             </div>
             <div className="flex flex-wrap gap-1.5 mb-2">
-              {["normal", "urgent", "psc", "defect"].map((p) => (
+              {["normal", "urgent", "psc", "defect", "cosmetic"].map((p) => (
                 <button key={p} onClick={() => onSet(j.id, { priority: p })} className="wb-t px-2.5 py-1 rounded-full"
                   style={{
                     fontSize: 11, fontWeight: 500, textTransform: "uppercase",

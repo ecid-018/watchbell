@@ -39,6 +39,7 @@ import { daysToArrival } from "./phase.js";
 import { estimatePhotoBytes, purgeOldPhotos } from "./photodb.js";
 import { buildPhotoZip } from "./photozip.js";
 import { fileCandidate, mergeRead, mergeReflect, recoveryCandidates } from "./recovery.js";
+import { scheduleJson, todaysPlan } from "./dashboard.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
   isWindowSuspended, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
@@ -1572,6 +1573,8 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               onAdd={addPlan} onSet={setPlan} onSpawn={spawnJob}
               onExport={() => JSON.stringify(exportAll(), null, 2)}
               onExportFallback={setExporting}
+              // The live day, not a previewed leg: `done` is always today's log.
+              onExportSchedule={() => scheduleJson(todaysPlan({ phases, jobs, log: done, events }, new Date()))}
               onImport={importAll}
               quota={quota}
               reportProfile={reportProfile} onSetReportProfile={setReportProfile}
@@ -1630,27 +1633,37 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
             style={{ background: C.card, border: `1px solid ${C.line2}`, boxShadow: C.shadow }}
             onClick={(e) => e.stopPropagation()}>
             <div className="px-5 pt-5 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
-              <div style={eyebrow}>EVERYTHING, AS JSON</div>
+              <div style={eyebrow}>{exporting.kind === "schedule" ? "TODAY'S PLAN, AS JSON" : "EVERYTHING, AS JSON"}</div>
               <div style={{ fontSize: 13, lineHeight: 1.45, marginTop: 4, color: C.text2 }}>
-                {(exporting.length / 1024).toFixed(1)} KB. Copy it somewhere off the ship before a
-                reinstall — a download is not something iOS reliably lets a home-screen app do.
+                {exporting.kind === "schedule" ? (
+                  <>
+                    {(exporting.json.length / 1024).toFixed(1)} KB. Save it as{" "}
+                    <span style={{ fontFamily: F.mono }}>{exporting.filename}</span> in the Ops Dashboard's
+                    shared folder — the dashboard watches for that exact name.
+                  </>
+                ) : (
+                  <>
+                    {(exporting.json.length / 1024).toFixed(1)} KB. Copy it somewhere off the ship before a
+                    reinstall — a download is not something iOS reliably lets a home-screen app do.
+                  </>
+                )}
               </div>
             </div>
             <div className="px-5 py-4">
-              <textarea readOnly value={exporting} rows={8}
+              <textarea readOnly value={exporting.json} rows={8}
                 onFocus={(e) => e.target.select()}
                 className="wb-t w-full rounded-xl px-3 py-2" style={{
                   fontFamily: F.mono, fontSize: 11, lineHeight: 1.4, color: C.text2,
                   background: C.sub, border: `1px solid ${C.line2}`, resize: "none",
                 }} />
               <div className="flex gap-2 mt-3">
-                <button onClick={() => { try { navigator.clipboard?.writeText(exporting); } catch (e) { /* select and copy by hand */ } }}
+                <button onClick={() => { try { navigator.clipboard?.writeText(exporting.json); } catch (e) { /* select and copy by hand */ } }}
                   className="wb-t flex-1 rounded-xl py-2.5" style={{
                     fontSize: 13.5, fontWeight: 600, background: C.amber,
                     color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.amber}`,
                   }}>Copy</button>
-                <a href={`data:application/json;charset=utf-8,${encodeURIComponent(exporting)}`}
-                  download={`watchbell-${todayKey}.json`}
+                <a href={`data:application/json;charset=utf-8,${encodeURIComponent(exporting.json)}`}
+                  download={exporting.filename}
                   className="wb-t flex-1 rounded-xl py-2.5 text-center" style={{
                     fontSize: 13.5, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}`,
                   }}>Save a file</a>

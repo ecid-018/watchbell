@@ -12,12 +12,13 @@ import React, { useState } from "react";
 import { F } from "./theme.js";
 import { dateKey } from "./voyage.js";
 import { totalGapDays } from "./recovery.js";
+import { SCHEDULE_FILENAME } from "./dashboard.js";
 
 export const SOURCES = ["Office", "Class", "Own", "Superintendent"];
 export const STATUSES = [["planned", "Planned"], ["active", "In progress"], ["done", "Done"]];
 
 export default function PlansTab({
-  C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportFallback, onImport, quota,
+  C, dark, wide, plans, today, onAdd, onSet, onSpawn, onExport, onExportSchedule, onExportFallback, onImport, quota,
   reportProfile, onSetReportProfile, photoBytes, onPurgePhotos, onExportPhotos,
   journalRecovery, onRecoverReflections, onInspectJournalFile, onMergeJournalFile,
 }) {
@@ -68,22 +69,31 @@ export default function PlansTab({
   );
 
   /** Share sheet first — the one path that reliably saves a file from an iOS
-      home-screen app. Anything that can't share falls back to the on-screen
-      copy/download panel, which works everywhere. */
-  const handleExport = async () => {
-    const json = onExport();
+      home-screen app, and the one that reaches Files and from there the
+      ship's SMB share. Anything that can't share falls back to the on-screen
+      copy/download panel, which works everywhere. Both exports go through
+      here, so the file name is the only thing that tells them apart. */
+  const shareJson = async (json, filename, title, kind) => {
     const blob = new Blob([json], { type: "application/json" });
-    const file = new File([blob], `watchbell-${dateKey(new Date())}.json`, { type: "application/json" });
+    const file = new File([blob], filename, { type: "application/json" });
     try {
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: "Watchbell Backup" });
+        await navigator.share({ files: [file], title });
         return;
       }
     } catch (e) {
       if (e.name === "AbortError") return; // user cancelled the share sheet
     }
-    onExportFallback(json);
+    onExportFallback({ json, filename, kind });
   };
+
+  const handleExport = () =>
+    shareJson(onExport(), `watchbell-${dateKey(new Date())}.json`, "Watchbell Backup", "backup");
+
+  // Named schedule.json and nothing else — the dashboard watches for exactly
+  // that name, so a date stamped into it would never be picked up.
+  const handleExportSchedule = () =>
+    shareJson(onExportSchedule(), SCHEDULE_FILENAME, "Today's plan — Ops Dashboard", "schedule");
 
   const handleExportPhotos = async () => {
     setExportingPhotos(true);
@@ -217,6 +227,14 @@ export default function PlansTab({
               style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.line2}` }}>
               Export everything to JSON
             </button>
+            <button onClick={handleExportSchedule} className="wb-t w-full rounded-xl py-2.5 mb-1"
+              style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.foam}` }}>
+              Export today's plan for the Ops Dashboard
+            </button>
+            <div style={{ fontSize: 11.5, lineHeight: 1.5, padding: "0 4px 10px", color: C.dim2 }}>
+              {SCHEDULE_FILENAME} for the ECR wall — duty items and open jobs, nothing else.
+              Anyone in the control room can read it.
+            </div>
             {merging ? (
               <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
                 <div style={eyebrow}>MERGE JOURNAL FROM A FILE</div>

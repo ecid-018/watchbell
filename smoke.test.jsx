@@ -16,6 +16,7 @@ import { BACKLOG } from "./src/data/jobs-backlog.js";
 import { pscReadiness } from "./src/psc.js";
 import { readExifDate } from "./src/exif.js";
 import { fileCandidate, mergeRead, mergeReflect, reflectGaps, totalGapDays } from "./src/recovery.js";
+import { SCHEDULE_FILENAME, SCHEDULE_SCHEMA_VERSION, SHARED_TAGS, hhmm, scheduleJson, todaysPlan } from "./src/dashboard.js";
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
 import { allRefs, fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
 import { colourOf, marksIn, quote, toggleMark } from "./src/marks.js";
@@ -232,6 +233,97 @@ t("suspended work is never owed",        dayDoable(seaLeg, NEW, [arrival]).every
 const night = byId(dayItems(seaLeg, NEW, [overnight]));
 t("the evening block suspends at night", night.evening.stood);
 t("the evening shower is moved late",    night["shower-pm"].movedFor === "Bunkering");
+
+/* -------- today's plan, for the Ops Dashboard -------- */
+
+// The outbound passage, joined on 10 August, so 13 September is day 35 — the
+// Indian Ocean leg. A second copy joined on 7 August puts the same date on
+// day 38, the arrival leg, where the night round goes late.
+const SJ_NOW = new Date(2026, 8, 13, 9, 15);
+const SJ_KEY = "2026-09-13";
+const sjPhases = [{ kind: "voyage", route: "outbound", start: "2026-08-10", readOffset: 1 }];
+const sjArrivalPhases = [{ kind: "voyage", route: "outbound", start: "2026-08-07", readOffset: 1 }];
+const sjJobs = [
+  { ...makeJob({ title: "Grease the purifier bearings", assignee: "Oiler" }, SJ_KEY) },
+  { ...makeJob({ title: "No.2 A/E fuel pump overhaul", assignee: "3/E" }, SJ_KEY), priority: "defect" },
+  { ...makeJob({ title: "Oil in the bilge well", assignee: "2/E" }, SJ_KEY), priority: "psc" },
+  { ...makeJob({ title: "Unassigned gasket" }, SJ_KEY) },
+  { ...makeJob({ title: "Still in the pool", assignee: "3/E" }, SJ_KEY), status: "pooled" },
+  { ...makeJob({ title: "Already finished", assignee: "3/E" }, SJ_KEY), status: "done", doneOn: SJ_KEY },
+  { ...makeJob({ title: "Written off", assignee: "3/E" }, SJ_KEY), status: "dropped", droppedOn: SJ_KEY },
+];
+// A log with ticks on private items as well as duty ones, to prove the private
+// ones leave no trace in the file.
+const sjLog = { "round-am": true, word: true, train: true, "fuel-open": true, phoneOut: true, adminCarriedCritical: ["x"] };
+const sjState = { phases: sjPhases, jobs: sjJobs, log: sjLog, events: [] };
+const sj = todaysPlan(sjState, SJ_NOW);
+const sjLabels = sj.items.map((i) => i.label);
+const sjText = scheduleJson(sj);
+
+t("the file is schema version one, from WatchBell", sj.schema_version === 1 && SCHEDULE_SCHEMA_VERSION === 1 && sj.app === "WatchBell");
+t("it is named exactly what the dashboard watches for", SCHEDULE_FILENAME === "schedule.json");
+t("the top level is the contract and nothing more",
+  Object.keys(sj).join() === "schema_version,app,date,generated_utc,leg,items,jobs");
+t("the date is the ship's date",          sj.date === SJ_KEY);
+t("the stamp is UTC, from the moment it was made", sj.generated_utc === SJ_NOW.toISOString() && sj.generated_utc.endsWith("Z"));
+t("the leg is named as the iPad names it", sj.leg === "Indian Ocean");
+t("every item is time, label, tag, done",  sj.items.length > 0 && sj.items.every((i) => Object.keys(i).join() === "time,label,tag,done"));
+t("every job is label, priority, assignee", sj.jobs.length > 0 && sj.jobs.every((j) => Object.keys(j).join() === "label,priority,assignee"));
+
+t("times are HH:MM, never WatchBell's 0730", sj.items.every((i) => /^\d{2}:\d{2}$/.test(i.time)) && sj.items[0].time === "07:30");
+t("the reader's times are converted, not reformatted by guesswork",
+  hhmm("0730") === "07:30" && hhmm("2000") === "20:00" && hhmm("0005") === "00:05");
+t("a time that is not a time is unknown, not midnight",
+  hhmm("") === null && hhmm("730") === null && hhmm("2460") === null && hhmm("1275") === null && hhmm(undefined) === null);
+t("items run in time order", sj.items.every((i, n) => n === 0 || sj.items[n - 1].time <= i.time));
+t("on the arrival leg the night round is written late, as the iPad shows it",
+  todaysPlan({ ...sjState, phases: sjArrivalPhases }, SJ_NOW).items.find((i) => i.label === "Night round").time === "22:00");
+
+t("duty is the only tag allowed on the shared screen", SHARED_TAGS.join() === "duty");
+t("nothing but duty reaches the file",     sj.items.every((i) => i.tag === "duty"));
+t("the rounds, daywork and both admin blocks are there",
+  ["Morning round", "Daywork", "Morning admin", "Afternoon admin", "Night round"].every((l) => sjLabels.includes(l)));
+t("prayer, reading and evening prayer stay off the wall",
+  !sjLabels.includes("Prayer and Bible reading") && !sjLabels.includes("Cabin reset and evening prayer"));
+t("training stays off the wall",           !sjLabels.includes("Exercise"));
+t("the fasting window stays off the wall", !sj.items.some((i) => /window|Water|Protein|Vegetables|merienda/.test(i.label)));
+t("the trading session stays off the wall", !sjLabels.includes("Trading session"));
+t("wake, showers and lights out stay off the wall",
+  !["Wake, hydrate, make the bunk", "Shower", "Lights out", "Evening block"].some((l) => sjLabels.includes(l)));
+// Quoted, because the filter is on tags and not on words: a job called
+// "No.2 A/E fuel pump overhaul" is engine-room work and belongs on the wall.
+t("ticks on private items leave no trace in the file",
+  ['"word"', '"train"', '"fuel-open"', '"phoneOut"', '"adminCarriedCritical"', "fasting", "reflect", "Psalm"]
+    .every((token) => !sjText.includes(token)));
+t("a fuel pump is still engine-room work",  sj.jobs.some((j) => j.label === "No.2 A/E fuel pump overhaul"));
+
+t("done comes from the day's log",
+  sj.items.find((i) => i.label === "Morning round").done === true && sj.items.find((i) => i.label === "Daywork").done === false);
+const sjEmpty = todaysPlan({ ...sjState, log: {} }, SJ_NOW);
+t("a day with nothing stood still writes a valid file",
+  sjEmpty.items.length > 0 && sjEmpty.items.every((i) => i.done === false) &&
+  JSON.stringify(JSON.parse(scheduleJson(sjEmpty))) === JSON.stringify(sjEmpty));
+t("no record at all is unknown, not not-done",
+  todaysPlan({ ...sjState, log: null }, SJ_NOW).items.every((i) => i.done === null));
+
+const sjArrival = todaysPlan({ ...sjState, events: [{ date: SJ_KEY, type: "Arrival", start: "07:00", hours: 6 }] }, SJ_NOW);
+t("an admin block stood down by an arrival is not shown as owed",
+  !sjArrival.items.some((i) => i.label === "Morning admin"));
+t("while the rounds it does not displace stay on",
+  ["Morning round", "Daywork", "Night round"].every((l) => sjArrival.items.some((i) => i.label === l)));
+
+t("only open jobs go up — not the pool, not closed, not dropped",
+  sj.jobs.length === 4 && !sj.jobs.some((j) => /pool|finished|Written off/.test(j.label)));
+t("PSC and defects lead, as on the iPad's own list",
+  sj.jobs[0].priority === "psc" && sj.jobs[1].priority === "defect");
+t("a job nobody has is null, not a blank",
+  sj.jobs.find((j) => j.label === "Unassigned gasket").assignee === null);
+
+const sjBare = todaysPlan({ phases: [], jobs: [], log: {}, events: [] }, SJ_NOW);
+t("with no passage set up the file is still valid, with the leg unknown",
+  sjBare.leg === null && sjBare.items.length === 0 && sjBare.jobs.length === 0 &&
+  JSON.parse(scheduleJson(sjBare)).schema_version === 1);
+t("the written file is json, and ends on a newline", sjText.endsWith("}\n") && JSON.parse(sjText).date === SJ_KEY);
 
 /* -------- graveyard -------- */
 

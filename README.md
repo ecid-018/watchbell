@@ -457,6 +457,22 @@ private browsing) the app drops to session-only rather than failing to start.
 Deleting the home-screen icon deletes this data. If you want a copy, Settings → Safari
 is not enough — read the keys out via a desktop browser on the same URL.
 
+### What goes on the Ops Dashboard
+
+Plans → **Export today's plan for the Ops Dashboard** writes `schedule.json` for the wall
+display in the engine control room, which watches a shared folder on the ship's LAN for it.
+It is deliberately not `exportAll()`: a backup carries the reading, reflections, fasting and
+training records, and would tie the dashboard to this app's storage keys. `todaysPlan()` in
+`src/dashboard.js` builds a small payload with a contract of its own, schema version 1:
+
+- `date`, `generated_utc`, and the live `leg` — never a leg being previewed
+- `items` — `tag: "duty"` only (`SHARED_TAGS`), times as `HH:MM`, `done` from the day's log.
+  Anything ship's business has stood down is left off rather than shown as owed
+- `jobs` — open jobs only: title as `label`, `priority`, `assignee`
+
+Any field may be `null` when it is not known. Everything in this file is on a screen anyone
+walking into the ECR can read, so `SHARED_TAGS` is an allow-list — widen it on purpose.
+
 ---
 
 ## Layout of the source
@@ -492,6 +508,7 @@ src/
   events.js                   ship's business, suspension, the graveyard rule
   jobs.js                     the job model and its carry arithmetic
   store.js                    the versioned stores, migration and export
+  dashboard.js                today's plan for the Ops Dashboard — schedule.json
   stats.js                    rolling seven, grace days, on plan, trained
   storage.js                  localStorage keys and safe accessors
   useLandscape.js             is there room to work side by side

@@ -459,16 +459,22 @@ is not enough — read the keys out via a desktop browser on the same URL.
 
 ### What goes on the Ops Dashboard
 
-Plans → **Export today's plan for the Ops Dashboard** writes `schedule.json` for the wall
-display in the engine control room, which watches a shared folder on the ship's LAN for it.
+Plans → **Copy today's plan** and **Save today's plan** produce `schedule.json` for the wall
+display in the engine control room. The iPad cannot mount the ship's SMB share, so the file
+reaches the dashboard through its upload page, opened from a QR code. **Copy** puts the JSON
+on the clipboard to paste there — the daily route. **Save** sends the same file through the
+share sheet to Files, a USB stick or email, for when the LAN is not available.
+
 It is deliberately not `exportAll()`: a backup carries the reading, reflections, fasting and
 training records, and would tie the dashboard to this app's storage keys. `todaysPlan()` in
 `src/dashboard.js` builds a small payload with a contract of its own, schema version 1:
 
-- `date`, `generated_utc`, and the live `leg` — never a leg being previewed
+- `date` — the local date the plan is for; the dashboard compares it with today and flags a
+  stale plan. Also `generated_utc`, and the live `leg` — never a leg being previewed
 - `items` — `tag: "duty"` only (`SHARED_TAGS`), times as `HH:MM`, `done` from the day's log.
   Anything ship's business has stood down is left off rather than shown as owed
-- `jobs` — open jobs only: title as `label`, `priority`, `assignee`
+- `jobs` — open jobs only: title as `label`, `assignee`, and `priority` on WatchBell's own
+  scale — psc, defect, urgent, normal, cosmetic — which the dashboard colour-codes in that order
 
 Any field may be `null` when it is not known. Everything in this file is on a screen anyone
 walking into the ECR can read, so `SHARED_TAGS` is an allow-list — widen it on purpose.

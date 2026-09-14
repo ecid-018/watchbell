@@ -324,6 +324,19 @@ t("with no passage set up the file is still valid, with the leg unknown",
   sjBare.leg === null && sjBare.items.length === 0 && sjBare.jobs.length === 0 &&
   JSON.parse(scheduleJson(sjBare)).schema_version === 1);
 t("the written file is json, and ends on a newline", sjText.endsWith("}\n") && JSON.parse(sjText).date === SJ_KEY);
+t("the date is the local day at both ends of it, never UTC's",
+  todaysPlan(sjState, new Date(2026, 8, 13, 0, 5)).date === SJ_KEY &&
+  todaysPlan(sjState, new Date(2026, 8, 13, 23, 55)).date === SJ_KEY);
+t("job priorities are WatchBell's own scale, passed through as they are",
+  sj.jobs.every((j) => ["psc", "defect", "urgent", "normal", "cosmetic"].includes(j.priority)));
+
+// renderToString escapes an apostrophe, so undo that before reading the labels.
+const sjPlans = renderToString(
+  <PlansTab C={THEME.dark} dark wide={false} plans={[]} today={SJ_NOW} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop} />,
+).replace(/<!--.*?-->/g, "").replace(/&#x27;/g, "'");
+t("Plans offers today's plan both ways out", sjPlans.includes("Copy today's plan") && sjPlans.includes("Save today's plan"));
+t("and neither can be mistaken for the backup", sjPlans.includes("OPS DASHBOARD") && sjPlans.includes("Export everything to JSON"));
+t("the single export button they replace is gone", !sjPlans.includes("Export today's plan for the Ops Dashboard"));
 
 /* -------- graveyard -------- */
 

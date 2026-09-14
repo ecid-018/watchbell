@@ -36,6 +36,7 @@ export default function PlansTab({
   const [purgeArmed, setPurgeArmed] = useState(false);
   const [purging, setPurging] = useState(false);
   const [purgeResult, setPurgeResult] = useState(null);
+  const [planCopied, setPlanCopied] = useState(false);
 
   const eyebrow = { fontFamily: F.mono, fontSize: 9, letterSpacing: ".12em", color: C.dim2 };
   const field = {
@@ -69,10 +70,10 @@ export default function PlansTab({
   );
 
   /** Share sheet first — the one path that reliably saves a file from an iOS
-      home-screen app, and the one that reaches Files and from there the
-      ship's SMB share. Anything that can't share falls back to the on-screen
-      copy/download panel, which works everywhere. Both exports go through
-      here, so the file name is the only thing that tells them apart. */
+      home-screen app, to Files, a USB stick or an email. Anything that can't
+      share falls back to the on-screen copy/download panel, which works
+      everywhere. Both exports go through here, so the file name is the only
+      thing that tells them apart. */
   const shareJson = async (json, filename, title, kind) => {
     const blob = new Blob([json], { type: "application/json" });
     const file = new File([blob], filename, { type: "application/json" });
@@ -90,10 +91,32 @@ export default function PlansTab({
   const handleExport = () =>
     shareJson(onExport(), `watchbell-${dateKey(new Date())}.json`, "Watchbell Backup", "backup");
 
+  /* Today's plan has two ways out, because the iPad cannot mount the ship's
+     SMB share. The daily one is Copy: straight to the clipboard, then the
+     dashboard's upload page, reached by QR code, takes it as pasted text — the
+     Files app never comes into it. Save is the same JSON through the share
+     sheet, for when there is no LAN to paste into. */
+
   // Named schedule.json and nothing else — the dashboard watches for exactly
   // that name, so a date stamped into it would never be picked up.
-  const handleExportSchedule = () =>
+  const saveSchedule = () =>
     shareJson(onExportSchedule(), SCHEDULE_FILENAME, "Today's plan — Ops Dashboard", "schedule");
+
+  // The JSON is built before anything is awaited: iOS only lets a page write
+  // the clipboard inside the tap that asked for it. If it refuses anyway, the
+  // plan opens in the panel to be copied by hand — a Copy button that quietly
+  // did nothing would leave yesterday's plan on the wall.
+  const copySchedule = async () => {
+    const json = onExportSchedule();
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("no clipboard here");
+      await navigator.clipboard.writeText(json);
+      setPlanCopied(true);
+      setTimeout(() => setPlanCopied(false), 2500);
+    } catch (e) {
+      onExportFallback({ json, filename: SCHEDULE_FILENAME, kind: "schedule" });
+    }
+  };
 
   const handleExportPhotos = async () => {
     setExportingPhotos(true);
@@ -227,13 +250,25 @@ export default function PlansTab({
               style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.line2}` }}>
               Export everything to JSON
             </button>
-            <button onClick={handleExportSchedule} className="wb-t w-full rounded-xl py-2.5 mb-1"
-              style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.foam}` }}>
-              Export today's plan for the Ops Dashboard
-            </button>
+            <div style={{ ...eyebrow, padding: "6px 4px" }}>OPS DASHBOARD — TODAY'S PLAN</div>
+            <div className="flex gap-2 mb-1">
+              <button onClick={copySchedule} className="wb-t flex-1 rounded-xl py-2.5"
+                style={{
+                  fontSize: 12.5, fontWeight: 600,
+                  color: planCopied ? (dark ? "#0E1C22" : "#FFFFFF") : C.text2,
+                  background: planCopied ? C.foam : "transparent",
+                  border: `1px solid ${C.foam}`,
+                }}>
+                {planCopied ? "Copied" : "Copy today's plan"}
+              </button>
+              <button onClick={saveSchedule} className="wb-t flex-1 rounded-xl py-2.5"
+                style={{ fontSize: 12.5, color: C.text2, border: `1px solid ${C.foam}` }}>
+                Save today's plan
+              </button>
+            </div>
             <div style={{ fontSize: 11.5, lineHeight: 1.5, padding: "0 4px 10px", color: C.dim2 }}>
-              {SCHEDULE_FILENAME} for the ECR wall — duty items and open jobs, nothing else.
-              Anyone in the control room can read it.
+              Copy, scan the dashboard's QR code, paste. Save sends {SCHEDULE_FILENAME} to Files, a USB
+              stick or email. Duty items and open jobs only — anyone in the ECR can read it.
             </div>
             {merging ? (
               <div className="wb-t rounded-2xl p-4 mb-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>

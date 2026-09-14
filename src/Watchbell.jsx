@@ -1637,9 +1637,9 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
               <div style={{ fontSize: 13, lineHeight: 1.45, marginTop: 4, color: C.text2 }}>
                 {exporting.kind === "schedule" ? (
                   <>
-                    {(exporting.json.length / 1024).toFixed(1)} KB. Save it as{" "}
-                    <span style={{ fontFamily: F.mono }}>{exporting.filename}</span> in the Ops Dashboard's
-                    shared folder — the dashboard watches for that exact name.
+                    {(exporting.json.length / 1024).toFixed(1)} KB. Paste it on the Ops Dashboard's upload
+                    page, or save it as <span style={{ fontFamily: F.mono }}>{exporting.filename}</span> —
+                    the dashboard reads that exact name.
                   </>
                 ) : (
                   <>

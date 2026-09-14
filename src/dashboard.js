@@ -2,8 +2,10 @@
    What WatchBell tells the Ops Dashboard.
 
    The dashboard is a wall display in the engine control room. It reads
-   files dropped into a shared folder on the ship's LAN, and this module
-   is the one it reads from us: today's plan, as schedule.json.
+   files from a shared folder on the ship's LAN, and this module is the
+   one it reads from us: today's plan, as schedule.json. The iPad cannot
+   mount that share, so the file reaches it through the dashboard's own
+   upload page — pasted from the clipboard, or sent as a file.
 
    It is deliberately not exportAll(). A backup is personal — the reading,
    the reflections, fasting, training — and it is shaped like this app's
@@ -115,6 +117,9 @@ export function todaysPlan({ phases, jobs, log, events }, now) {
   return {
     schema_version: SCHEDULE_SCHEMA_VERSION,
     app: "WatchBell",
+    // The local date the plan is for — the ship's, not UTC's. The dashboard
+    // compares it against its own today and says plainly when the plan on the
+    // wall is stale, so this must never slip a day either side of midnight.
     date: dk,
     generated_utc: now.toISOString(),
     leg: leg ? leg.name || null : null,

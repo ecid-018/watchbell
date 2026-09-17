@@ -15,12 +15,17 @@ import { appendPhase, arrivalUTCOf, currentPhase, endpointsOf, migrate, replaceC
 import { exportAll, migrateStores } from "./store.js";
 import { repairLegacyPhotos } from "./photodb.js";
 import { importBacklog } from "./backlog.js";
+import { importCampaigns } from "./campaign.js";
+import CAMPAIGN_TEMPLATES from "./data/campaign-templates.json";
 import { dateKey } from "./voyage.js";
 
 // Storage is brought up to the current schema before anything reads it.
 migrateStores();
 // Idempotent: adds any backlog item not already on the jobs list, by id.
 importBacklog(dateKey(new Date()));
+// Same again for the campaigns seeded in data/campaign-templates.json: their
+// phases and their work land in the pool, once, by id.
+importCampaigns(CAMPAIGN_TEMPLATES, dateKey(new Date()));
 
 export default function App() {
   const [phases, setPhases] = useState(() => migrate(readJSON(K.phases, null), readJSON(K.start, null)));

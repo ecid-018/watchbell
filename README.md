@@ -192,6 +192,23 @@ underneath. Only the text scrolls.
 Tapping a day in the plan list switches the reading rather than opening a sheet, and the
 05:35 item on the Day tab takes you here.
 
+### Catching up
+
+Under the plan list are two more: the days still owed, oldest first, and the journal,
+newest first. A reflection is stored under its reading day — the counter, not the date,
+because that is what the plan rows and the recovery merge have always keyed on — but the
+date it was written is now recorded beside it, so the journal can be read by when rather
+than by number. Entries written before that existed derive their date from the passage.
+
+**A day is unread because it was never marked read**, not because it is behind us. The app
+used to assume the past was read, which is exactly what made a day missed at sea leave no
+trace. The list reaches back forty-five days; the chapters for every day it names are
+carried with the rest, so catching up needs no network. Opening one puts you in the
+reading with the reflection open — the ordinary act, not a separate mode.
+
+Day 41 of a 40-day passage reads day 41. The rail still holds at day 40, because "day 40
+of 40" is the truth about the passage; the reading is a counter and keeps counting.
+
 ### Highlighters
 
 Three markers, meaning whatever you decide they mean — the app does not name them.
@@ -344,6 +361,33 @@ and the trading session stands down, as does the training session if it was a
 HIIT day. It is marked as recovery on the Day and Body tabs, in the plain words
 that it is not a day you lost.
 
+### The clock
+
+Sailing east the clock goes forward overnight and the night is an hour shorter,
+which the fixed 05:30 template knows nothing about. So the clock is something
+you **declare**: tap the UTC label on the Day tab, pick the zone, and say whether
+it stands from today or from tomorrow. A higher zone from tomorrow is how you
+say the clock goes forward tonight.
+
+That morning then behaves like a one-hour recovery — the personal morning moves
+an hour later as a block and the session takes its lighter block — but **nothing
+stands down**: an hour short is not a night on the bunker manifold, and the desk
+keeps its hours because the market did not move. A night's work past midnight
+outranks it on the same date. Declaring the clock *back* does nothing; the day is
+twenty-five hours long and nothing is owed.
+
+**The passage plan is never evidence.** It deals the changes out evenly between
+departure and arrival, which is arithmetic and not the master's orders, so an
+undeclared change adjusts nothing. The header always shows the zone in force,
+marked `· set` once you have declared one, so a stale one is visible. Cash open
+follows the declared zone. *Follow the passage plan* clears the log for the
+passage. Declarations are scoped to a phase, so a correction from a finished
+passage is never read for a new one.
+
+This replaces the old standing "actual UTC offset" — the same fact, now with a
+date on it. One already set is carried in as a declaration from the day the
+passage began, so nothing moves under you.
+
 ---
 
 ## Jobs
@@ -361,6 +405,84 @@ has to happen at midnight, so nothing can go wrong at midnight. Past three days
 the row turns oxide — that is the signal, and there is no notification.
 
 Done, Carry or Drop. A dropped job is archived and reopenable, never deleted.
+
+### Campaigns
+
+An audit or a survey is a hundred small jobs with one date on the end of them.
+The Campaign segment is where that lives, and it is **not a second checklist
+system** — every line in it is an ordinary job in `watchbell:jobs`, pooled the
+same way the backlog is pooled, carrying the same photos, the same detail field
+and the same Done. What a campaign adds is the one thing a job has never had: a
+deadline. Jobs have no due date, so the dates sit on the campaign's **phases**,
+and a job belongs to a phase.
+
+The phases are copied out of the template when the campaign starts, not read
+from it afterwards. Editing the JSON later cannot move a deadline on a campaign
+already running — the same rule the stores follow.
+
+Progress is `closed / total`, a count first, with the percentage beside it. Done
+jobs count closed; dropped jobs leave the total, because a line you decided not
+to do is not a line you failed.
+
+**Items come to Today by phase, not by age.** An item whose phase is overdue, or
+due inside seven days, is pinned above the rank groups — oxide for overdue,
+amber for the week — exactly as a PSC item inside 21 days of arrival is pinned.
+Pooled items show a Pull button there; nothing is ever opened automatically.
+Everything else waits in the Campaign view, out of the way.
+
+**The open-items tracker** is the handful of lines that need an answer from
+somebody rather than an afternoon's work. Each carries an owner, a status, a
+free-text note of where the evidence is, and a dated log of every status change,
+kept in `watchbell:jobs:campaignLog` beside the job rather than inside it — the
+same shape as a PSC deferral. Closed is not stored: it is read off the job being
+done, so the tracker and the checklist can never disagree.
+
+**Duplicate with a new target** clones a finished campaign for next year. Every
+phase due date shifts by the same number of days as the target moved, the jobs
+come back pooled with their ids rebased, and the tracker starts empty. The
+original is untouched.
+
+#### Adding a campaign template
+
+Templates live in `src/data/campaign-templates.json`, an array of objects:
+
+```json
+{
+  "id": "AS26",
+  "seed": true,
+  "title": "MV Queen Trader – SMS/ISPS Internal Audit & BV Annual Survey",
+  "target": "2026-10-09",
+  "phases": [
+    { "id": "W1", "name": "Week 1: Certificates, documents, open items", "due": "2026-09-22",
+      "groups": [
+        { "name": "Certificates", "items": [
+          { "id": "W1-01", "title": "Check every statutory certificate against its endorsement window" },
+          { "id": "W1-09", "title": "Hatch cover HP flange O-ring: office reply on file",
+            "tracker": { "owner": "CE", "status": "awaiting_office" } }
+        ] }
+      ] }
+  ]
+}
+```
+
+- **Ids are permanent.** The job id is `${campaign.id}-${item.id}`, so `AS26-W1-09`
+  is what a photo and a log line key against. Append new ids; never renumber old
+  ones, and never reuse one for a different line.
+- **`seed: true`** instantiates the campaign on the next boot. Without it the
+  template waits under "Start from a template" until you pick a target date.
+- **Import is idempotent and additive**, like the backlog: it appends a campaign
+  whose id is absent and appends jobs whose ids are absent. Add a line to a
+  campaign already running and the next boot pools just that line. A line you
+  have already worked is never overwritten, and a line you delete from the file
+  stays on the iPad.
+- **Optional item fields:** `note` (becomes the detail), `priority`
+  (`psc · defect · urgent · normal · cosmetic`, default `normal`), `where`
+  (`sea · port · either`, default `sea`), `check`, `fabrication`, and `tracker`
+  (`{owner, status}`) to put the line in the open-items tracker. A seed status of
+  `closed` is a template error — `templateProblems()` reports it, and the tests
+  run that check over the shipped file.
+- A `psc` or `defect` item joins the PSC readiness count and its 21-day pin too.
+  That is intended, and it is why priority is set per item rather than assumed.
 
 ---
 
@@ -429,6 +551,8 @@ Everything is in `localStorage` on the iPad. Nothing leaves the ship.
 | `watchbell:phases` | The ordered phase list — passages and port stays |
 | `watchbell:read` | Reading-plan progress, keyed by the continuous reading day |
 | `watchbell:reflect` | One reflection per reading day |
+| `watchbell:reflect:dates` | The date each reflection was written, keyed by the same reading day |
+| `watchbell:shipZone` | Declared clock changes for this passage: `{phaseStart, changes:[{from, offset}]}` |
 | `watchbell:figures` | How many times each form figure has been opened |
 | `watchbell:jobs` | Every job, open and archived |
 | `watchbell:plans` | The vault |
@@ -436,13 +560,15 @@ Everything is in `localStorage` on the iPad. Nothing leaves the ship.
 | `watchbell:weeks` | One entry per week, keyed by its Monday |
 | `watchbell:ranks` | Who jobs can be assigned to |
 | `watchbell:marks` | Highlighted verses, keyed by book, chapter and verse |
+| `watchbell:campaigns` | Audit and survey campaigns: `{id, title, target, status, phases:[{id, name, due}]}` |
+| `watchbell:jobs:campaignLog` | The tracker's history: `{[jobId]: [{date, status}]}` |
+| `watchbell:mode` | `"auto"` / `"light"` / `"dark"` |
+| `watchbell:voyageStart` | Pre-phases departure date. Still read on first launch after an update, and still written, so a rollback finds it |
 | `watchbell:schema` | The storage version migrations run against |
 
 The reading's text is the one thing not in `localStorage`: it lives in the Cache
 API under `watchbell-bible-v1`, because it is bulk and because that is what the
 Cache API is for. Clearing it is the only way it shrinks.
-| `watchbell:mode` | `"auto"` / `"light"` / `"dark"` |
-| `watchbell:voyageStart` | Pre-phases departure date. Still read on first launch after an update, and still written, so a rollback finds it |
 
 Storage is **versioned**. `migrateStores()` runs once at boot, before anything
 reads, and every step is additive and guarded so a migration interrupted
@@ -504,6 +630,7 @@ src/
     ExerciseFigure.jsx        animated SVG form demonstrations
   data/
     training-plan.js          the seven-day rotation and the safety rules
+    campaign-templates.json   the audit and survey checklists, as written
   theme.js                    F (fonts) and THEME (colours)
   schedule.js                 BASE, TAGS, itemsForLeg(), the cash-open derivation
   phase.js                    routes, generated legs, the phase list
@@ -511,8 +638,13 @@ src/
   training.js                 reading the plan; the bout queue
   bible.js                    the reading's text, cache-first and cache-only
   marks.js                    highlighted verses
+  clock.js                    the declared zone, and the night it changed
+  journal.js                  what is unread, and what has been written
+  JournalList.jsx             the two lists under the passage
   events.js                   ship's business, suspension, the graveyard rule
   jobs.js                     the job model and its carry arithmetic
+  campaign.js                 phases, deadlines, progress and the tracker
+  CampaignView.jsx            the campaign screen
   store.js                    the versioned stores, migration and export
   dashboard.js                today's plan for the Ops Dashboard — schedule.json
   stats.js                    rolling seven, grace days, on plan, trained

@@ -1,0 +1,498 @@
+[
+  {
+    "id": "AS26",
+    "seed": true,
+    "title": "MV Queen Trader – SMS/ISPS Internal Audit & BV Annual Survey",
+    "target": "2026-10-09",
+    "phases": [
+      {
+        "id": "SC",
+        "name": "Scope & open questions",
+        "due": "2026-09-22",
+        "groups": [
+          {
+            "name": "Scope",
+            "items": [
+              {
+                "id": "SC-01",
+                "title": "Confirm exact audit scope (full SMS + ISPS or sampled chapters) and auditor names"
+              },
+              {
+                "id": "SC-02",
+                "title": "Confirm BV survey scope: which certificates endorsed at this call, any class items added"
+              },
+              {
+                "id": "SC-03",
+                "title": "Obtain previous internal audit report and last annual survey report"
+              },
+              {
+                "id": "SC-04",
+                "title": "Confirm whether the October crew change (Master + 2) coincides with the audit port"
+              },
+              {
+                "id": "SC-05",
+                "title": "Close out the findings from the previous internal audit",
+                "tracker": {
+                  "owner": "Master",
+                  "status": "open"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "W1",
+        "name": "Week 1: Certificates, documents, open items",
+        "due": "2026-09-22",
+        "groups": [
+          {
+            "name": "Certificates",
+            "items": [
+              {
+                "id": "W1-01",
+                "title": "Check every statutory and class certificate: validity, last endorsement, survey window"
+              },
+              {
+                "id": "W1-02",
+                "title": "List anything expiring before mid-2027 and flag to office"
+              },
+              {
+                "id": "W1-03",
+                "title": "Confirm CSR, SMC, ISSC, DOC copy, MLC, IAPP supplement, EEXI/CII statement on board and current"
+              }
+            ]
+          },
+          {
+            "name": "SMS documentation",
+            "items": [
+              {
+                "id": "W1-04",
+                "title": "Ship's SMS copies match latest office issue (Mar 2026 rev + all appendages)"
+              },
+              {
+                "id": "W1-05",
+                "title": "All forms current revision; superseded pages removed"
+              },
+              {
+                "id": "W1-06",
+                "title": "Master's review / management review record on file"
+              },
+              {
+                "id": "W1-07",
+                "title": "CE Standing Orders signed by all engine officers and current"
+              },
+              {
+                "id": "W1-08",
+                "title": "Familiarization checklists complete for everyone joined in last 6 months"
+              }
+            ]
+          },
+          {
+            "name": "Open items",
+            "items": [
+              {
+                "id": "W1-09",
+                "title": "GC QNTR-GC-033 hatch cover HP flange O-ring: status and office reply on file",
+                "tracker": {
+                  "owner": "CE",
+                  "status": "open"
+                }
+              },
+              {
+                "id": "W1-10",
+                "title": "SCR air compressor bearing guarantee claim: status, temporary arrangement, main air reserve mitigation documented",
+                "tracker": {
+                  "owner": "CE",
+                  "status": "awaiting_office"
+                }
+              },
+              {
+                "id": "W1-11",
+                "title": "No.2 C/H water ingress sensor guarantee claim: submitted and acknowledged",
+                "tracker": {
+                  "owner": "CE / C/O",
+                  "status": "open"
+                }
+              },
+              {
+                "id": "W1-12",
+                "title": "Deck crane annual survey (due Aug 2026): confirm done, record filed",
+                "tracker": {
+                  "owner": "CE",
+                  "status": "open"
+                }
+              },
+              {
+                "id": "W1-13",
+                "title": "15 ppm bilge alarm / Valve X test: office confirmation, test done and recorded (ORB Code I x3, Bilge Monitor Log, photos) or documented as pending",
+                "tracker": {
+                  "owner": "CE",
+                  "status": "awaiting_office"
+                }
+              },
+              {
+                "id": "W1-14",
+                "title": "All PSC and BV observations from New Orleans closed with evidence",
+                "tracker": {
+                  "owner": "Master / CE",
+                  "status": "open"
+                }
+              },
+              {
+                "id": "W1-15",
+                "title": "Near-miss and NC reports since last audit: corrective action and closure on each",
+                "tracker": {
+                  "owner": "Master / CE",
+                  "status": "open"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Engine department records",
+            "items": [
+              {
+                "id": "W1-16",
+                "title": "PMS overdue list at zero, or justified deferrals approved by office",
+                "tracker": {
+                  "owner": "2/E",
+                  "status": "open"
+                }
+              },
+              {
+                "id": "W1-17",
+                "title": "Critical equipment list vs critical spares ROB cross-checked"
+              },
+              {
+                "id": "W1-18",
+                "title": "ORB Part I reconciles with Daily Sounding Log and tank soundings"
+              },
+              {
+                "id": "W1-19",
+                "title": "BDNs and MARPOL samples complete; sample locker location decided and labelled",
+                "tracker": {
+                  "owner": "CE",
+                  "status": "open"
+                }
+              },
+              {
+                "id": "W1-20",
+                "title": "SCR NOx spot-check records (Scheme A) on file; EGCS/IAPP records if applicable"
+              },
+              {
+                "id": "W1-21",
+                "title": "Calibration records: portable gas detectors, OCM, fixed gas detection"
+              },
+              {
+                "id": "W1-22",
+                "title": "LO, fuel and cooling water analysis reports with actions on out-of-spec results"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "W2",
+        "name": "Week 2: Physical readiness & records",
+        "due": "2026-09-29",
+        "groups": [
+          {
+            "name": "Annual survey walk-through",
+            "items": [
+              {
+                "id": "W2-01",
+                "title": "Emergency generator: auto-start on blackout simulation and load test, logged"
+              },
+              {
+                "id": "W2-02",
+                "title": "Emergency fire pump: pressure at furthest hydrant, logged"
+              },
+              {
+                "id": "W2-03",
+                "title": "Emergency steering from steering flat with bridge comms, logged"
+              },
+              {
+                "id": "W2-04",
+                "title": "Quick-closing valves and remote stops operated and reset"
+              },
+              {
+                "id": "W2-05",
+                "title": "Fire dampers, skylights, E/R closing appliances operate freely, marked"
+              },
+              {
+                "id": "W2-06",
+                "title": "Fixed CO2: cylinder service dates, release line, pre-discharge alarm, vent stop"
+              },
+              {
+                "id": "W2-07",
+                "title": "Fire detection: loop/zone test with bridge and E/R panel"
+              },
+              {
+                "id": "W2-08",
+                "title": "Bilge system: wells clean, pumps and eductor tested, OWS and 15 ppm alarm with 3-way valve"
+              },
+              {
+                "id": "W2-09",
+                "title": "Sewage plant and incinerator operating, records current"
+              },
+              {
+                "id": "W2-10",
+                "title": "Boiler safety valves: last float/lift date recorded, gags removed"
+              },
+              {
+                "id": "W2-11",
+                "title": "ME and generator alarms/trips (overspeed, LO low pressure) test records"
+              },
+              {
+                "id": "W2-12",
+                "title": "Structural fire protection: E/R doors self-closing, penetrations sealed"
+              },
+              {
+                "id": "W2-13",
+                "title": "Watertight doors and remote valve indicators tested"
+              },
+              {
+                "id": "W2-14",
+                "title": "LSA/FFA inventory vs SEQ record; rescue boat engine started and run"
+              }
+            ]
+          },
+          {
+            "name": "Housekeeping and marking",
+            "items": [
+              {
+                "id": "W2-15",
+                "title": "E/R bilges dry, no oil leaks under engines, purifier room clean"
+              },
+              {
+                "id": "W2-16",
+                "title": "Escape routes clear, IMO signage and emergency lighting checked"
+              },
+              {
+                "id": "W2-17",
+                "title": "Workshop, stores and spares racks in order and labelled"
+              },
+              {
+                "id": "W2-18",
+                "title": "Steering gear room: hydraulic piping spray shields fitted, no loose gear"
+              },
+              {
+                "id": "W2-19",
+                "title": "Chemical and paint stores: SDS on hand, segregation correct"
+              }
+            ]
+          },
+          {
+            "name": "ISPS (engine side)",
+            "items": [
+              {
+                "id": "W2-20",
+                "title": "E/R, steering gear, emergency generator room restricted-area signage in place"
+              },
+              {
+                "id": "W2-21",
+                "title": "Access control: locks and key register working; gangway watch agreed for port"
+              },
+              {
+                "id": "W2-22",
+                "title": "Security lighting and CCTV operating"
+              },
+              {
+                "id": "W2-23",
+                "title": "SSAS test record current; DoS log, security level records, last 10 port calls up to date (SSO)"
+              },
+              {
+                "id": "W2-24",
+                "title": "Own SSP duties known and can be stated on request"
+              }
+            ]
+          },
+          {
+            "name": "Records to close",
+            "items": [
+              {
+                "id": "W2-25",
+                "title": "ORB, Garbage Record Book, Ballast Water Record Book"
+              },
+              {
+                "id": "W2-26",
+                "title": "Bilge Monitor Log and OWS operation log"
+              },
+              {
+                "id": "W2-27",
+                "title": "Rest hours: non-conformances explained and countersigned"
+              },
+              {
+                "id": "W2-28",
+                "title": "Permits to work, enclosed-space entries, hot-work records"
+              },
+              {
+                "id": "W2-29",
+                "title": "PMS job cards completed and closed with man-hours"
+              },
+              {
+                "id": "W2-30",
+                "title": "Training and drill records current"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "W3",
+        "name": "Week 3: Drills, mock audit, corrective actions",
+        "due": "2026-10-06",
+        "groups": [
+          {
+            "name": "Drills",
+            "items": [
+              {
+                "id": "W3-01",
+                "title": "Fire drill with E/R fire scenario and CO2 release simulation"
+              },
+              {
+                "id": "W3-02",
+                "title": "Abandon ship drill; rescue boat lowered and engine run if conditions allow"
+              },
+              {
+                "id": "W3-03",
+                "title": "Enclosed space entry and rescue drill"
+              },
+              {
+                "id": "W3-04",
+                "title": "Oil spill (SOPEP) drill in E/R or at bunker manifold"
+              },
+              {
+                "id": "W3-05",
+                "title": "Emergency steering drill"
+              },
+              {
+                "id": "W3-06",
+                "title": "Blackout and dead-ship recovery drill"
+              },
+              {
+                "id": "W3-07",
+                "title": "Security drill: raised level, unauthorized access or bomb threat"
+              }
+            ]
+          },
+          {
+            "name": "Mock internal audit",
+            "items": [
+              {
+                "id": "W3-08",
+                "title": "Run SMS internal audit checklist chapter by chapter with 2/E as auditee"
+              },
+              {
+                "id": "W3-09",
+                "title": "Interview engine ratings and junior officers: standing orders, SMS duties, near-miss reporting, DPA contact, overriding authority"
+              },
+              {
+                "id": "W3-10",
+                "title": "\"Show me\" questions for permits, LOTO, enclosed space, hot work"
+              },
+              {
+                "id": "W3-11",
+                "title": "Toolbox session on weak spots, recorded as training"
+              },
+              {
+                "id": "W3-12",
+                "title": "Every mock-audit finding closed with photo, log entry or job card"
+              }
+            ]
+          },
+          {
+            "name": "Corrective actions and spares",
+            "items": [
+              {
+                "id": "W3-13",
+                "title": "Repair list and defect reports updated with target dates and office responses"
+              },
+              {
+                "id": "W3-14",
+                "title": "Critical spares ROB physically verified against the list"
+              },
+              {
+                "id": "W3-15",
+                "title": "Hydraulic/pneumatic hoses, safety valves, pressure gauges: dates and condition checked"
+              },
+              {
+                "id": "W3-16",
+                "title": "Deferred maintenance has written office approval attached"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "FD",
+        "name": "Final days: Arrival readiness",
+        "due": "2026-10-08",
+        "groups": [
+          {
+            "name": "Arrival readiness",
+            "items": [
+              {
+                "id": "FD-01",
+                "title": "Auditor file: certificates, previous audit report, open-items tracker, drill records, PMS summary, office correspondence"
+              },
+              {
+                "id": "FD-02",
+                "title": "Surveyor file: certificates, previous survey report, Week 2 test records, repair list, spares list"
+              },
+              {
+                "id": "FD-03",
+                "title": "Crew briefing: schedule, escorts, who speaks to whom"
+              },
+              {
+                "id": "FD-04",
+                "title": "Final E/R clean-down; check for fresh leaks on audit morning"
+              },
+              {
+                "id": "FD-05",
+                "title": "If Master changes at this port: agree who signs attendance; joining Master's handover and familiarization ready"
+              },
+              {
+                "id": "FD-06",
+                "title": "Handover notes for any crew signing off"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "AD",
+        "name": "Audit day",
+        "due": "2026-10-09",
+        "groups": [
+          {
+            "name": "On the day",
+            "items": [
+              {
+                "id": "AD-01",
+                "title": "One engineer accompanies surveyor at all times; one officer accompanies auditor"
+              },
+              {
+                "id": "AD-02",
+                "title": "Running list of every point raised, with owner and deadline"
+              },
+              {
+                "id": "AD-03",
+                "title": "Evidence produced on request, from the responsible person"
+              },
+              {
+                "id": "AD-04",
+                "title": "Closing meeting: agree wording of each finding (observation vs NC) before signing"
+              },
+              {
+                "id": "AD-05",
+                "title": "Report filed; corrective action plan started same day"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

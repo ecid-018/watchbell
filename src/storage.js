@@ -18,6 +18,9 @@ export const K = {
   train: (dateKey) => `watchbell:train:${dateKey}`,
   read: "watchbell:read",
   reflect: "watchbell:reflect",
+  // When each reflection was written, beside the text rather than in it —
+  // the reflections themselves keep their reading-day keys untouched.
+  reflectDates: "watchbell:reflect:dates",
   figures: "watchbell:figures",
   schema: "watchbell:schema",
   jobs: "watchbell:jobs",
@@ -33,8 +36,14 @@ export const K = {
   fasting: "watchbell:fasting",
   prolongedFast: "watchbell:fasting:prolonged",
   prolongedFastLog: "watchbell:fasting:prolongedLog",
+  // Superseded by shipZone, which carries the same fact with a date on it.
+  // Still read once, to carry a standing correction forward, and still
+  // exported so an older backup restores whole.
   utcOverride: "watchbell:utcOverride",
+  shipZone: "watchbell:shipZone",
   pscDeferrals: "watchbell:jobs:pscDeferrals",
+  campaigns: "watchbell:campaigns",
+  campaignLog: "watchbell:jobs:campaignLog",
   reportProfile: "watchbell:reportProfile",
   // Pre-phases format. Still read on first launch after an update so an
   // existing passage survives, and still written so a rollback finds it.
@@ -240,11 +249,16 @@ export function replayWAL() {
   } catch (_) { /* ignore */ }
 }
 
-/** Get storage quota info for UI */
+/** Get storage quota info for UI, and whether the browser has agreed to
+    keep this origin rather than evict it under pressure. `persisted` is null
+    where the browser will not answer at all. */
 export async function getQuotaInfo() {
   if (!navigator.storage?.estimate) return null;
   const { usage, quota } = await navigator.storage.estimate();
-  return { usage: usage || 0, quota: quota || 0, pct: quota ? Math.round((usage || 0) / quota * 100) : 0 };
+  let persisted = null;
+  try { persisted = navigator.storage.persisted ? await navigator.storage.persisted() : null; }
+  catch (_) { /* not answerable here */ }
+  return { usage: usage || 0, quota: quota || 0, pct: quota ? Math.round((usage || 0) / quota * 100) : 0, persisted };
 }
 
 /** Today's tick record, or {} if the day has no record yet. */

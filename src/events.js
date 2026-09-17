@@ -81,7 +81,11 @@ const fmt = (m) => {
  */
 export function dayItems(leg, dk, events, opts = {}) {
   const ev = opts.event !== undefined ? opts.event : eventOn(events, dk);
-  const rec = opts.recovery !== undefined ? opts.recovery : recoveryOn(events, dk);
+  // A night's work past midnight wins over a clock change on the same date:
+  // it is the heavier claim on the morning, and it stands things down.
+  const rec = opts.recovery !== undefined
+    ? opts.recovery
+    : (recoveryOn(events, dk) ?? opts.clock ?? null);
   let items = itemsForLeg(leg, dk);
   if (!ev && !rec) return items;
 
@@ -89,13 +93,23 @@ export function dayItems(leg, dk, events, opts = {}) {
     const hiit = sessionForDate(parseKey(dk)).kind === "HIIT";
     const shift = rec.lost * 60;
     items = items.map((i) => {
+      // Shifted as a block. Clamping each item to the first round instead
+      // would stack the whole morning on one minute, which is not a lie-in.
+      const moved = MORNING.includes(i.id) ? { ...i, t: fmt(mins(i.t) + shift), shifted: true } : i;
+
+      // An hour short after the clock is not a night on the bunker manifold.
+      // Nothing stands down: the morning moves, the session takes its lighter
+      // block, and the desk keeps its hours — the market did not move.
+      if (rec.clock) {
+        return i.id === "train"
+          ? { ...moved, lighter: true, why: "an hour short after the clock" }
+          : moved;
+      }
+
       if (i.id === "trade" || (hiit && i.id === "train")) {
         return { ...i, stood: true, why: `recovery after ${rec.from.toLowerCase()}`, recovery: true };
       }
-      // Shifted as a block. Clamping each item to the first round instead
-      // would stack the whole morning on one minute, which is not a lie-in.
-      if (MORNING.includes(i.id)) return { ...i, t: fmt(mins(i.t) + shift), shifted: true };
-      return i;
+      return moved;
     });
   }
 

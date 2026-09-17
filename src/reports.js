@@ -27,7 +27,9 @@ export function pscReadinessReportData(jobs) {
 
 export function backlogStatusReportData(jobs) {
   const byGroup = new Map();
-  for (const j of jobs) {
+  // Campaign work has its own view and its own report; grouped in here by its
+  // sub-headings it would bury the notebook it is not part of.
+  for (const j of jobs.filter((x) => !x.campaign)) {
     const g = groupOf(j);
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(j);

@@ -153,10 +153,19 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
 
       {recovery && (
         <div className="wb-t rounded-xl mt-3 p-3" style={{ background: C.panel, border: `1px solid ${C.amber}66` }}>
-          <div style={{ ...eyebrow, color: C.amber }}>RECOVERY DAY</div>
+          <div style={{ ...eyebrow, color: C.amber }}>{recovery.clock ? "AN HOUR SHORT" : "RECOVERY DAY"}</div>
           <div style={{ fontSize: 12.5, lineHeight: 1.45, marginTop: 3, color: C.text }}>
-            {recovery.from} ran past midnight and took {recovery.lost} h of the morning. Nothing hard
-            today — walk it or take it off. The week's figure does not hold this against you.
+            {recovery.clock ? (
+              <>
+                The clock went forward last night and took an hour of it. Take the lighter block —
+                the week's figure does not hold this against you.
+              </>
+            ) : (
+              <>
+                {recovery.from} ran past midnight and took {recovery.lost} h of the morning. Nothing hard
+                today — walk it or take it off. The week's figure does not hold this against you.
+              </>
+            )}
           </div>
         </div>
       )}
@@ -164,7 +173,7 @@ export default function BodyTab({ C, dark, wide, session, heavy, onHeavy, record
       {heavy && (
         <div className="wb-t rounded-xl mt-3 p-3" style={{ background: dark ? "#2A130D" : "#F6E5E0", border: `1px solid ${C.oxide}66` }}>
           <div style={{ ...eyebrow, color: C.oxide }}>
-            HEAVY WEATHER{autoHeavy ? " · SET BY THE LEG" : ""}
+            HEAVY WEATHER{autoHeavy ? (recovery?.clock ? " · AFTER THE CLOCK" : " · SET BY THE LEG") : ""}
           </div>
           <div style={{ fontSize: 12.5, lineHeight: 1.45, marginTop: 3, color: C.text }}>
             {swapped

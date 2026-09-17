@@ -11,6 +11,7 @@ import TodayView from "./TodayView.jsx";
 import QuickCapture from "./QuickCapture.jsx";
 
 const BacklogView = lazy(() => import("./BacklogView.jsx"));
+const CampaignView = lazy(() => import("./CampaignView.jsx"));
 const PscView = lazy(() => import("./PscView.jsx"));
 const PhotoGallery = lazy(() => import("./PhotoGallery.jsx"));
 const BatchAttachView = lazy(() => import("./BatchAttachView.jsx"));
@@ -19,14 +20,16 @@ const ReportsView = lazy(() => import("./ReportsView.jsx"));
 // "Photos" is where you look at them; "Attach" is the batch pairing job you
 // do once after emptying a camera roll into the app.
 const SEGMENTS = [
-  ["today", "Today"], ["backlog", "Backlog"], ["psc", "PSC"],
+  ["today", "Today"], ["backlog", "Backlog"], ["campaign", "Campaign"], ["psc", "PSC"],
   ["photos", "Photos"], ["attach", "Attach"], ["reports", "Reports"],
 ];
 
 export default function JobsTab({
   C, dark, wide, jobs, pool, ranks, todayKey, events,
   pscPinnedIds, pscDeferrals, daysToArrival, reportProfile,
+  campaigns = [], campaignLog = {}, campaignTemplates = [], campaignPins = [], campaignSummary = null,
   onSet, onPull, onPush, onDefer, onQuickCapture,
+  onTrack, onSetCampaign, onStartCampaign, onDuplicateCampaign,
 }) {
   const [seg, setSeg] = useState("today");
   const [capturing, setCapturing] = useState(false);
@@ -52,12 +55,20 @@ export default function JobsTab({
       {seg === "today" && (
         <TodayView C={C} dark={dark} wide={wide} jobs={jobs} ranks={ranks} todayKey={todayKey}
           pscPinnedIds={pscPinnedIds} pscDeferrals={pscDeferrals}
-          onSet={onSet} onPush={onPush} onDefer={onDefer} />
+          campaignPins={campaignPins} campaignSummary={campaignSummary}
+          onSet={onSet} onPush={onPush} onDefer={onDefer} onPull={onPull}
+          onOpenCampaign={() => setSeg("campaign")} />
       )}
 
       <Suspense fallback={<div className="py-8 text-center" style={{ fontSize: 13, color: C.dim }}>Loading…</div>}>
         {seg === "backlog" && (
           <BacklogView C={C} dark={dark} wide={wide} pool={pool} events={events} todayKey={todayKey} onPull={onPull} />
+        )}
+        {seg === "campaign" && (
+          <CampaignView C={C} dark={dark} wide={wide} jobs={jobs} campaigns={campaigns}
+            campaignLog={campaignLog} templates={campaignTemplates} todayKey={todayKey}
+            onSet={onSet} onPull={onPull} onPush={onPush} onTrack={onTrack}
+            onSetCampaign={onSetCampaign} onStart={onStartCampaign} onDuplicate={onDuplicateCampaign} />
         )}
         {seg === "psc" && (
           <PscView C={C} dark={dark} wide={wide} jobs={jobs} todayKey={todayKey}

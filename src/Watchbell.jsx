@@ -20,7 +20,7 @@ import {
 } from "./schedule.js";
 import { K, readJSON, readLog, writeJSON, getQuotaInfo } from "./storage.js";
 import { addDays, clockDate, dateKey, parseKey, prettyDate } from "./voyage.js";
-import { currentPhase, dayOf, endpointsOf, isComplete, legOf, legsOf, lengthOf, nameOf, readingDayOf } from "./phase.js";
+import { currentPhase, dayOf, endpointsOf, isComplete, legOf, legsOf, lengthOf, nameOf, readingDayForDate, readingDayOf } from "./phase.js";
 import { graceDays, onPlan, rollingSeven } from "./stats.js";
 import { useLandscape } from "./useLandscape.js";
 import BodyTab from "./BodyTab.jsx";
@@ -39,6 +39,11 @@ import { daysToArrival } from "./phase.js";
 import { estimatePhotoBytes, purgeOldPhotos } from "./photodb.js";
 import { buildPhotoZip } from "./photozip.js";
 import { fileCandidate, mergeRead, mergeReflect, recoveryCandidates } from "./recovery.js";
+import { CATCHUP_WINDOW, journalEntries, unreadDays, unreadRows } from "./journal.js";
+import JournalList from "./JournalList.jsx";
+import { applyZone, clearZone, clockAdvanceOn, declareZone, declaredZoneFor, zoneChanges, zoneFor } from "./clock.js";
+import { campaignPinned, campaignProgress, duplicateCampaign, instantiateTemplate, nextCampaignId, trackerPatch } from "./campaign.js";
+import CAMPAIGN_TEMPLATES from "./data/campaign-templates.json";
 import { scheduleJson, todaysPlan } from "./dashboard.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
@@ -63,6 +68,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const [done, setDone] = useState(() => readLog(dateKey(new Date())));
   const [read, setRead] = useState(() => readJSON(K.read, {}) || {});
   const [reflect, setReflect] = useState(() => readJSON(K.reflect, {}) || {});
+  // The day each reflection was written, kept beside the text rather than in
+  // it: the reflections keep their reading-day keys, so the recovery merge and
+  // every auto-backup already on disk still line up exactly as they did.
+  const [reflectDates, setReflectDates] = useState(() => readJSON(K.reflectDates, {}) || {});
   const [sheet, setSheet] = useState(null); // the reading day the Word tab is on
   // How many times each figure has been opened. Once a movement is familiar it
   // stops asking for attention, so the list quietens down as the passage goes on.
@@ -97,6 +106,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // PSC defer-with-reason history, per job id, and the report header — both
   // small settings-shaped stores, same ad-hoc pattern as fasting/adminDeferred.
   const [pscDeferrals, setPscDeferrals] = useState(() => readJSON(K.pscDeferrals, {}) || {});
+  const [campaigns, setCampaigns] = useState(() => loadStore("campaigns"));
+  // The history of what each tracked item has been, beside the jobs rather
+  // than inside them — the same shape the PSC deferral log has.
+  const [campaignLog, setCampaignLog] = useState(() => readJSON(K.campaignLog, {}) || {});
   const [reportProfile, setReportProfileState] = useState(() => readJSON(K.reportProfile, null) ?? {
     vessel: "MV Queen Trader", rank: "", name: "",
   });
@@ -158,13 +171,21 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // start, so a stale correction from a finished passage is never read for
   // a new one — App.jsx remounts Watchbell on every phase change anyway,
   // which is what lets this be a plain lazy initializer rather than an effect.
-  const [utcOverride, setUtcOverride] = useState(() => {
-    const saved = readJSON(K.utcOverride, null);
-    return saved && saved.phaseStart === phase.start ? saved.offset : null;
+  const [shipZone, setShipZone] = useState(() => {
+    const saved = readJSON(K.shipZone, null);
+    if (saved && saved.phaseStart === phase.start) return saved;
+    // A standing manual offset was the same fact without a date on it. Carry
+    // it in as a declaration from the day the passage began, so the cash open
+    // does not move under someone who had already corrected it.
+    const old = readJSON(K.utcOverride, null);
+    if (old && old.phaseStart === phase.start) {
+      return { phaseStart: phase.start, changes: [{ from: phase.start, offset: old.offset }] };
+    }
+    return { phaseStart: phase.start, changes: [] };
   });
   const [editingUtc, setEditingUtc] = useState(false);
-  const applyUtcOverride = (l) =>
-    utcOverride == null || !l.utc ? l : { ...l, utcHours: utcOverride, utc: utcLabel(utcOverride), open: openForUTC(utcOverride) };
+  const [zonePick, setZonePick] = useState(null);
+  const [zoneFromTomorrow, setZoneFromTomorrow] = useState(true);
   // The legacy route's hand-written legs never carried a plain number, only
   // the formatted label — fall back to parsing it so the picker still opens
   // on the offset actually in force rather than defaulting to −12.
@@ -174,19 +195,25 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const C = dark ? THEME.dark : THEME.light;
 
   const rawLeg = legs[legIdx]; // legIdx, not autoLegIdx — may be a previewed leg
-  const leg = previewing ? rawLeg : applyUtcOverride(rawLeg);
+  const leg = previewing ? rawLeg : applyZone(rawLeg, shipZone, phase, todayKey);
   // Live, the day is the calendar's. Previewing another leg, fall back to that
   // leg's midpoint — the original component's rule, kept so look-ahead reads the same.
   const day = previewing ? Math.round((leg.d0 + leg.d1) / 2) : realDay;
-  const readDay = readingDayOf(phase, day);
-  const todayReadDay = readingDayOf(phase, realDay);
+  // Unclamped: realDay holds at the last day of the passage so the rail stays
+  // honest, but the reading plan is a counter. Held, every date past the end
+  // would key onto the same reading day and overwrite the day before it.
+  const todayReadDay = readingDayForDate(phase, now);
+  const readDay = previewing ? readingDayOf(phase, day) : todayReadDay;
   const plan = dayPlan(readDay);
 
   const shownKeyEarly = previewing
     ? dateKey(addDays(parseKey(phase.start), day - 1))
     : todayKey;
   const event = eventOn(events, shownKeyEarly);
-  const recovery = recoveryOn(events, shownKeyEarly);
+  // A declared clock advance reads as a short night, the same shape an
+  // overnight job's recovery does — so everything downstream treats it alike.
+  const clock = clockAdvanceOn(shipZone, phase, shownKeyEarly);
+  const recovery = recoveryOn(events, shownKeyEarly) ?? clock;
 
   // Fasting is a calendar fact like the admin tasks, not a leg-preview one:
   // the window is today's regardless of which leg's schedule is on screen.
@@ -197,7 +224,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const windowSuspended = isWindowSuspended(events, todayKey);
 
   const items = useMemo(
-    () => applyFastingWindow(dayItems(leg, shownKeyEarly, events), fastingWindow, prolongedActive),
+    () => applyFastingWindow(dayItems(leg, shownKeyEarly, events, { clock }), fastingWindow, prolongedActive),
     [leg, shownKeyEarly, events, fastingStage, isHiitToday, fasting.breakFastOnHiit, prolongedActive],
   );
 
@@ -215,7 +242,9 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // like the habit log, so previewing another day edits that day and not today.
   const [trainLog, setTrainLog] = useState({});
   const dayRec = shownKey in trainLog ? trainLog[shownKey] : readSession(shownKey);
-  const autoHeavy = !leg.trade;
+  // A leg stood down is the Cape or whatever stretch you named; a morning an
+  // hour short asks for the same lighter block for a different reason.
+  const autoHeavy = !leg.trade || items.some((i) => i.id === "train" && i.lighter);
   const heavy = dayRec?.heavy ?? autoHeavy;
 
   const putSession = (patch) => {
@@ -239,10 +268,11 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   // The highlight is always the live day's, never the previewed leg's: it answers
   // "what should I be doing now", which a look-ahead cannot change.
-  const liveLeg = applyUtcOverride(legs[autoLegIdx]);
+  const liveLeg = applyZone(legs[autoLegIdx], shipZone, phase, todayKey);
+  const liveClock = clockAdvanceOn(shipZone, phase, todayKey);
   const liveItems = useMemo(
-    () => applyFastingWindow(dayItems(liveLeg, todayKey, events), fastingWindow, prolongedActive),
-    [liveLeg, todayKey, events, fastingStage, isHiitToday, fasting.breakFastOnHiit, prolongedActive],
+    () => applyFastingWindow(dayItems(liveLeg, todayKey, events, { clock: liveClock }), fastingWindow, prolongedActive),
+    [liveLeg, todayKey, events, fastingStage, isHiitToday, fasting.breakFastOnHiit, prolongedActive, liveClock],
   );
   const nowItem = currentItem(liveItems, minutesOfDay(now));
   const nowEnd = windowEnd(liveItems, nowItem);
@@ -250,7 +280,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   // The Standing tab always reports today, never the previewed leg — otherwise
   // previewing the Cape would score today's ticks against an 11-item day.
-  const todayDoable = useMemo(() => dayDoable(liveLeg, todayKey, events), [liveLeg, todayKey, events]);
+  const todayDoable = useMemo(() => dayDoable(liveLeg, todayKey, events, { clock: liveClock }), [liveLeg, todayKey, events, liveClock]);
   const hit = todayDoable.filter((i) => done[i.id]).length;
   const span = lengthOf(phase);
   const progress = atSea ? Math.min(100, Math.max(0, ((day - 1) / (span - 1)) * 100)) : 0;
@@ -269,7 +299,17 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // The backlog pool, and the PSC figures that drive the pin and the
   // Standing tile. `jobs` is the one flat store — "pooled" is just a
   // status on the same rows Today and the archive already read.
-  const pool = useMemo(() => jobs.filter((j) => j.status === "pooled"), [jobs]);
+  // Campaign work lives in its own view, under its phases. Left in the pool it
+  // would bury the notebook under eighty-odd lines grouped by the wrong thing.
+  const pool = useMemo(() => jobs.filter((j) => j.status === "pooled" && !j.campaign), [jobs]);
+  const activeCampaign = useMemo(() => campaigns.find((c) => c.status === "active") || null, [campaigns]);
+  const campaignSummary = useMemo(
+    () => (activeCampaign
+      ? { ...campaignProgress(jobs, activeCampaign, todayKey), id: activeCampaign.id, title: activeCampaign.title }
+      : null),
+    [jobs, activeCampaign, todayKey],
+  );
+  const campaignPins = useMemo(() => campaignPinned(jobs, campaigns, todayKey), [jobs, campaigns, todayKey]);
   const pscReady = useMemo(() => pscReadiness(jobs), [jobs]);
   const arrivalDays = useMemo(() => daysToArrival(phase, now), [phase, todayKey]);
   const pscPinnedIds = useMemo(
@@ -307,6 +347,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => writeJSON(K.mode, mode), [mode]);
   useEffect(() => writeJSON(K.read, read), [read]);
   useEffect(() => writeJSON(K.reflect, reflect), [reflect]);
+  useEffect(() => writeJSON(K.reflectDates, reflectDates), [reflectDates]);
   useEffect(() => writeJSON(K.figures, seenFigures), [seenFigures]);
   useEffect(() => writeJSON(K.adminCompletions, adminDone), [adminDone]);
   useEffect(() => writeJSON(K.adminDeferrals, adminDeferred), [adminDeferred]);
@@ -314,14 +355,16 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   useEffect(() => writeJSON(K.prolongedFast, prolongedFast), [prolongedFast]);
   useEffect(() => writeJSON(K.prolongedFastLog, prolongedFastLog), [prolongedFastLog]);
   useEffect(() => writeJSON(K.pscDeferrals, pscDeferrals), [pscDeferrals]);
+  useEffect(() => writeJSON(K.campaignLog, campaignLog), [campaignLog]);
   useEffect(() => writeJSON(K.reportProfile, reportProfile), [reportProfile]);
   // Cheap (byte counts only, no blob reads) but no reason to run it every
   // tick — refreshed on mount and whenever Plans (where it's shown) opens.
   useEffect(() => { if (tab === "plans") estimatePhotoBytes().then(setPhotoBytes); }, [tab]);
   useEffect(() => {
-    writeJSON(K.utcOverride, utcOverride == null ? null : { phaseStart: phase.start, offset: utcOverride });
-  }, [utcOverride, phase.start]);
+    writeJSON(K.shipZone, shipZone);
+  }, [shipZone]);
   useEffect(() => saveStore("jobs", jobs), [jobs]);
+  useEffect(() => saveStore("campaigns", campaigns), [campaigns]);
   useEffect(() => saveStore("plans", plans), [plans]);
   useEffect(() => saveStore("events", events), [events]);
   useEffect(() => saveStore("weeks", weeks), [weeks]);
@@ -397,15 +440,28 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
 
   /* -------- the reading gate -------- */
 
-  const isRead = (d) => read[d] ?? d < todayReadDay;
+  // A day is read because it was marked read, not because it is behind us.
+  // The old optimistic default is what made a missed day invisible.
+  const isRead = (d) => read[d] === true;
+
+  const catchupFrom = Math.max(1, todayReadDay - CATCHUP_WINDOW);
+  const unread = useMemo(() => unreadDays(read, catchupFrom, todayReadDay), [read, catchupFrom, todayReadDay]);
+  const unreadList = useMemo(() => unreadRows(unread, phases), [unread, phases]);
+  const journal = useMemo(() => journalEntries(reflect, reflectDates, phases), [reflect, reflectDates, phases]);
 
   // Ticking a reading opens the reflection instead of setting the flag. Today's
   // reading also carries the 05:35 item, so writing one closes both.
   const openReflection = (d) => { setSheet(d === readDay ? null : d); setBrowse(null); setTab("word"); };
 
+  // First wins: a reflection is dated the day it was first written, so
+  // re-opening one months later to fix a word does not re-date it.
+  const stampReflection = (d) =>
+    setReflectDates((m) => (m[d] ? m : { ...m, [d]: todayKey }));
+
   const saveReflection = (d, text) => {
     setReflect((r) => ({ ...r, [d]: text }));
     setRead((r) => ({ ...r, [d]: true }));
+    stampReflection(d);
     if (d === todayReadDay) setDone((x) => ({ ...x, word: true }));
   };
 
@@ -453,6 +509,35 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   const pushToPool = (id) => setJob(id, { status: "pooled" });
 
   // A defer is a logged reason, not a state change — the job stays open.
+  /* -------- campaigns -------- */
+
+  const setCampaign = (id, patch) =>
+    setCampaigns((all) => all.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  // A status change is two writes, the way a PSC deferral is: the job itself so
+  // the row can be drawn without the log, and the log so the history survives
+  // the next change.
+  const trackJob = (id, status, note) => {
+    const job = jobs.find((j) => j.id === id);
+    if (!job) return;
+    setJob(id, trackerPatch(job, status, todayKey));
+    setCampaignLog((m) => ({ ...m, [id]: [...(m[id] || []), { date: todayKey, status, ...(note ? { note } : {}) }] }));
+  };
+
+  const startCampaign = (template, target) => {
+    const id = nextCampaignId(template.id, campaigns);
+    const { campaign, jobs: seeded } = instantiateTemplate(template, todayKey, { id, target });
+    setCampaigns((all) => [...all, campaign]);
+    setJobs((all) => [...all, ...seeded]);
+  };
+
+  const duplicate = (campaign, target) => {
+    const id = nextCampaignId(campaign.templateId || campaign.id, campaigns);
+    const { campaign: next, jobs: clones } = duplicateCampaign(campaign, jobs, target, todayKey, id);
+    setCampaigns((all) => [...all, next]);
+    setJobs((all) => [...all, ...clones]);
+  };
+
   const deferPsc = (id, reason) => {
     const entry = { date: todayKey, reason };
     setJob(id, { lastDeferral: entry });
@@ -572,17 +657,21 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
   // Every chapter the rest of this phase will ask for. A port stay is
   // open-ended, so it carries six weeks and no more.
   const bibleRefs = useMemo(() => {
-    const last = Math.min(lengthOf(phase), realDay + 44);
+    // Forward to the end of the phase, and back to the oldest day still owed —
+    // catching up is no use if the chapters for those days were never carried.
+    const ahead = Math.min(readingDayOf(phase, lengthOf(phase)), todayReadDay + 44);
+    const to = Math.max(todayReadDay, ahead);
+    const from = Math.max(1, unread.length ? Math.min(unread[0], todayReadDay) : todayReadDay);
     const out = [];
-    for (let d = realDay; d <= last; d++) {
-      const p = dayPlan(readingDayOf(phase, d));
+    for (let d = from; d <= to; d++) {
+      const p = dayPlan(d);
       for (const ref of [p.psalm, p.nt]) {
         const parsed = parseRef(ref);
         if (parsed) out.push(parsed);
       }
     }
     return out;
-  }, [phase, realDay]);
+  }, [phase, todayReadDay, unread]);
 
   // What the reader is looking at: the day's two chapters, or a browsed one.
   const shownRefs = useMemo(() => {
@@ -684,6 +773,17 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
     );
   };
 
+  const zoneNow = zoneFor(shipZone, phase, todayKey) ?? utcHoursOf(legs[autoLegIdx]);
+  const zoneShown = zonePick ?? zoneNow;
+  const zoneFromKey = zoneFromTomorrow ? dateKey(addDays(now, 1)) : todayKey;
+  const zoneBefore = zoneFor(shipZone, phase, dateKey(addDays(parseKey(zoneFromKey), -1)));
+  const zoneWillAdvance = zoneBefore != null && zoneShown > zoneBefore;
+  const zoneLog = zoneChanges(shipZone, phase);
+  const setTheClock = () => {
+    setShipZone(declareZone(shipZone, phase, zoneShown, zoneFromKey));
+    setZonePick(null);
+  };
+
   const clockBand = () => (
     <div>
       <div className="flex items-end justify-between">
@@ -709,9 +809,10 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: ".08em", color: C.text2 }}>{clockDate(now)}</div>
           {leg.utc ? (
             <button onClick={() => setEditingUtc(!editingUtc)} className="wb-t" style={{
-              fontFamily: F.mono, fontSize: 10.5, color: utcOverride != null ? C.oxide : C.amber, marginTop: 2,
+              fontFamily: F.mono, fontSize: 10.5, minHeight: 22,
+              color: declaredZoneFor(shipZone, phase, todayKey) != null ? C.oxide : C.amber, marginTop: 2,
             }}>
-              UTC {leg.utc}{utcOverride != null ? " · manual" : ""}
+              UTC {leg.utc}{declaredZoneFor(shipZone, phase, todayKey) != null ? " · set" : ""}
             </button>
           ) : (
             <div style={{ fontFamily: F.mono, fontSize: 10.5, color: C.amber, marginTop: 2 }}>ALONGSIDE</div>
@@ -720,25 +821,60 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       </div>
       {editingUtc && leg.utc && (
         <div className="wb-t rounded-2xl mt-3 p-3" style={{ background: C.sub, border: `1px solid ${C.line2}` }}>
-          <div style={eyebrow}>ACTUAL UTC OFFSET ONBOARD</div>
-          <select value={utcOverride ?? utcHoursOf(legs[autoLegIdx])} onChange={(e) => setUtcOverride(Number(e.target.value))}
+          <div style={eyebrow}>SHIP'S CLOCK</div>
+          <select value={zoneShown} onChange={(e) => setZonePick(Number(e.target.value))}
             className="wb-t w-full rounded-xl mt-2 px-3" style={{
-              fontFamily: F.mono, fontSize: 16, color: C.text, height: 44,
+              fontFamily: F.mono, fontSize: 16, color: C.text, height: 44, minWidth: 0,
               background: C.card, border: `1px solid ${C.line2}`,
               WebkitAppearance: "none", colorScheme: dark ? "dark" : "light",
             }}>
             {UTC_CHOICES.map((v) => <option key={v} value={v}>{utcLabel(v)}</option>)}
           </select>
-          {utcOverride != null && (
-            <button onClick={() => setUtcOverride(null)} className="wb-t w-full rounded-xl mt-2 py-2"
-              style={{ fontSize: 12.5, color: C.dim, border: `1px solid ${C.line2}` }}>
-              Reset to automatic
-            </button>
+          <div className="flex gap-2 mt-2">
+            {[[false, "From today"], [true, "From tomorrow"]].map(([v, label]) => (
+              <button key={label} onClick={() => setZoneFromTomorrow(v)} className="wb-t flex-1 rounded-xl"
+                style={{
+                  fontSize: 12.5, fontWeight: 600, minHeight: 44, minWidth: 0,
+                  background: zoneFromTomorrow === v ? C.amber : "transparent",
+                  color: zoneFromTomorrow === v ? (dark ? "#0E1C22" : "#FFFFFF") : C.dim,
+                  border: `1px solid ${zoneFromTomorrow === v ? C.amber : C.line2}`,
+                }}>{label}</button>
+            ))}
+          </div>
+          {zoneWillAdvance && (
+            <div style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 8, color: C.amber }}>
+              The clock goes forward an hour {zoneFromTomorrow ? "tonight" : "overnight"} — that
+              morning starts an hour later and the session takes its lighter block.
+            </div>
+          )}
+          <button onClick={setTheClock} className="wb-t w-full rounded-xl mt-2"
+            style={{
+              fontSize: 13, fontWeight: 600, minHeight: 44,
+              background: C.amber, color: dark ? "#0E1C22" : "#FFFFFF", border: `1px solid ${C.amber}`,
+            }}>
+            Set {utcLabel(zoneShown)} from {zoneFromTomorrow ? "tomorrow" : "today"}
+          </button>
+          {zoneLog.length > 0 && (
+            <>
+              <div style={{ ...eyebrow, marginTop: 12 }}>DECLARED THIS PASSAGE</div>
+              {zoneLog.slice(-5).map((c) => (
+                <div key={c.from} className="flex items-baseline justify-between" style={{ marginTop: 4 }}>
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.text2 }}>UTC {utcLabel(c.offset)}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.dim2 }}>from {c.from}</span>
+                </div>
+              ))}
+              <button onClick={() => { setShipZone(clearZone(phase)); setZonePick(null); }}
+                className="wb-t w-full rounded-xl mt-2" style={{
+                  fontSize: 12.5, color: C.dim, minHeight: 44, border: `1px solid ${C.line2}`,
+                }}>
+                Follow the passage plan
+              </button>
+            </>
           )}
           <div style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 8, color: C.dim2 }}>
-            The passage assumes an even clock change from departure to arrival. If the ship actually
-            changed clocks on a different day, set the real offset here — cash open and the label
-            follow it until you change it again or reset to automatic.
+            The passage only guesses at the clock, so it never adjusts a morning on its own. Say
+            what the ship is keeping and from when — cash open and the label follow it, and a zone
+            set forward from tomorrow makes tomorrow a short night.
           </div>
         </div>
       )}
@@ -1162,10 +1298,19 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
       {dueBanner()}
       {recovery && (
         <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.amber}66` }}>
-          <div style={{ ...eyebrow, color: C.amber }}>RECOVERY DAY</div>
+          <div style={{ ...eyebrow, color: C.amber }}>{recovery.clock ? "AN HOUR SHORT" : "RECOVERY DAY"}</div>
           <div style={{ fontSize: 12.5, lineHeight: 1.45, marginTop: 3, color: C.text }}>
-            {recovery.from} ran past midnight. The morning is {recovery.lost} h later, and the
-            session and the desk are stood down. This is not a day you lost.
+            {recovery.clock ? (
+              <>
+                The clock went forward last night. The morning is an hour later and the session
+                takes its lighter block. The desk keeps its hours — the market did not move.
+              </>
+            ) : (
+              <>
+                {recovery.from} ran past midnight. The morning is {recovery.lost} h later, and the
+                session and the desk are stood down. This is not a day you lost.
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1271,7 +1416,7 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
         C={C} dark={dark} wide={wide}
         plan={shownPlan} readDay={shownReadDay}
         isRead={isRead(shownReadDay)} reflection={reflect[shownReadDay]} marks={marks}
-        onReflect={(d, text) => setReflect((r) => ({ ...r, [d]: text }))}
+        onReflect={(d, text) => { setReflect((r) => ({ ...r, [d]: text })); if (text && text.trim()) stampReflection(d); }}
         onRead={(d, text) => saveReflection(d, text)}
         onUnread={(d) => clearReading(d)}
         onMarks={setMarks}
@@ -1303,6 +1448,9 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           </button>
         );
       })}
+
+      <JournalList C={C} unread={unreadList} entries={journal} shownReadDay={shownReadDay}
+        onOpen={(d) => { setSheet(d === shownReadDay ? null : d); setBrowse(null); }} />
     </div>
   );
 
@@ -1558,8 +1706,12 @@ export default function Watchbell({ phases, onEditPhase, onNewPhase }) {
           <JobsTab C={C} dark={dark} wide={wide} jobs={jobs} pool={pool} ranks={ranks} todayKey={todayKey}
             events={events} pscPinnedIds={pscPinnedIds} pscDeferrals={pscDeferrals}
             daysToArrival={arrivalDays} reportProfile={reportProfile}
+            campaigns={campaigns} campaignLog={campaignLog} campaignTemplates={CAMPAIGN_TEMPLATES}
+            campaignPins={campaignPins} campaignSummary={campaignSummary}
             onSet={setJob} onPull={pullFromPool} onPush={pushToPool} onDefer={deferPsc}
-            onQuickCapture={quickCapture} />
+            onQuickCapture={quickCapture}
+            onTrack={trackJob} onSetCampaign={setCampaign}
+            onStartCampaign={startCampaign} onDuplicateCampaign={duplicate} />
         )}
         <Suspense fallback={<div className="py-8 text-center" style={{ fontSize: 13, color: C.dim }}>Loading…</div>}>
           {tab === "word" && wordTab()}

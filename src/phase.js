@@ -14,7 +14,7 @@
 ------------------------------------------------------------------ */
 
 import { LEGS, openForUTC, utcLabel } from "./schedule.js";
-import { daysBetween, parseKey, startOfDay } from "./voyage.js";
+import { addDays, dateKey, daysBetween, parseKey, startOfDay } from "./voyage.js";
 
 /**
  * The passage the app was built around, kept as data only for phases stored
@@ -173,6 +173,33 @@ export const legOf = (phase, day) => {
 
 /** The continuous reading-plan day, which does not reset when a phase does. */
 export const readingDayOf = (phase, day) => (phase.readOffset ?? 1) + day - 1;
+
+/**
+ * The reading day a date falls on. Unclamped on purpose.
+ *
+ * dayOf() holds at the last day of a passage so the rail and "day 40 of 40"
+ * stay honest once you have overrun, but the reading plan is a counter and
+ * not a rail: held, every date past the end would map to the same reading
+ * day, and each day's reflection would be written over the last one's under
+ * the same key. Day 41 reads day 41.
+ */
+export const readingDayForDate = (phase, date) =>
+  readingDayOf(phase, Math.max(1, rawDayOf(phase, date)));
+
+/**
+ * The calendar date a reading day fell on, or null if it predates the first
+ * phase. Phases tile the counter — nextReadOffset() derives each offset from
+ * the calendar gap — so the last phase to have started at or before a day is
+ * the one that holds it.
+ */
+export const dateForReadingDay = (phases, day) => {
+  const list = phases || [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const offset = list[i].readOffset ?? 1;
+    if (day >= offset) return dateKey(addDays(parseKey(list[i].start), day - offset));
+  }
+  return null;
+};
 
 /** A passage whose last day is behind us. Port stays never complete on their own. */
 export const isComplete = (phase, date) =>

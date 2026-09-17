@@ -9,11 +9,13 @@ import React, { useState } from "react";
 import { F } from "./theme.js";
 import { CARRY_WARN, autoPhotoTag, canDrop, carriedFor, carryLabel, groupByAssignee } from "./jobs.js";
 import { isFromBacklog } from "./backlog.js";
+import { shortDue } from "./campaign.js";
 import PhotoRow from "./PhotoRow.jsx";
 
 export default function TodayView({
   C, dark, wide, jobs, ranks, todayKey, pscPinnedIds, pscDeferrals,
-  onSet, onPush, onDefer,
+  campaignPins = [], campaignSummary = null,
+  onSet, onPush, onDefer, onPull, onOpenCampaign,
 }) {
   const [open, setOpen] = useState(null);
   const [deferring, setDeferring] = useState(null);
@@ -136,8 +138,63 @@ export default function TodayView({
     );
   };
 
+  // Campaign work close enough to be today's problem. Pooled items are shown
+  // with a way onto the list rather than being silently pulled: what today
+  // holds is a decision, and the app does not get to make it at midnight.
+  const overduePins = campaignPins.filter((j) => j.overdue);
+  const soonPins = campaignPins.filter((j) => !j.overdue);
+  const pinnedCampaignIds = new Set(campaignPins.map((j) => j.id));
+  const nextPhase = campaignSummary && campaignSummary.phases.find((p) => p.state !== "done");
+
+  const pinRow = (j) => (j.status === "open" ? row(j, true) : (
+    <div key={j.id} className="flex items-center gap-3 py-1.5 px-2">
+      <span className="flex-1" style={{ minWidth: 0 }}>
+        <span className="block" style={{ fontSize: 13, lineHeight: 1.35, color: C.text }}>{j.title}</span>
+        <span className="block" style={{ fontFamily: F.mono, fontSize: 10, marginTop: 1, color: C.dim2 }}>
+          {j.phase} · due {shortDue(j.due)}
+        </span>
+      </span>
+      <button onClick={() => onPull && onPull(j.id)} className="wb-t shrink-0 rounded-lg px-3"
+        style={{ minHeight: 44, fontSize: 12, fontWeight: 600, color: C.text2, border: `1px solid ${C.line2}` }}>
+        Pull
+      </button>
+    </div>
+  ));
+
+  const pinBox = (list, label, tone) => list.length > 0 && (
+    <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${tone}` }}>
+      <div style={{ ...eyebrow, color: tone, marginBottom: 4 }}>{label} · {list.length}</div>
+      {list.map(pinRow)}
+    </div>
+  );
+
   return (
     <div>
+      {campaignSummary && (
+        <button onClick={onOpenCampaign} className="wb-t w-full rounded-2xl p-3 mb-3 text-left"
+          style={{ minHeight: 44, background: C.panel, border: `1px solid ${C.line2}` }}>
+          <div className="flex items-baseline justify-between gap-3">
+            <span style={eyebrow}>CAMPAIGN</span>
+            <span style={{ fontFamily: F.mono, fontSize: 12, color: C.text2 }}>
+              {campaignSummary.closed}/{campaignSummary.total}
+              {campaignSummary.pct === null ? "" : ` · ${campaignSummary.pct}%`}
+            </span>
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.35, marginTop: 2, color: C.text }}>{campaignSummary.title}</div>
+          {nextPhase && (
+            <div style={{
+              fontFamily: F.mono, fontSize: 10, marginTop: 2,
+              color: nextPhase.state === "overdue" ? C.oxide : nextPhase.state === "due-soon" ? C.amber : C.dim2,
+            }}>
+              next: {nextPhase.id} due {shortDue(nextPhase.due)}
+            </div>
+          )}
+        </button>
+      )}
+
+      {pinBox(overduePins, "CAMPAIGN — OVERDUE", C.oxide)}
+      {pinBox(soonPins, "CAMPAIGN — DUE THIS WEEK", C.amber)}
+
       {pinned.length > 0 && (
         <div className="wb-t rounded-2xl p-3 mb-3" style={{ background: C.sub, border: `1px solid ${C.oxide}` }}>
           <div style={{ ...eyebrow, color: C.oxide, marginBottom: 4 }}>INSIDE 21 DAYS — PSC OPEN</div>
@@ -151,7 +208,7 @@ export default function TodayView({
         </div>
       )}
       {groups.map(([rank, list]) => {
-        const rest = list.filter((j) => !pscPinnedIds.has(j.id));
+        const rest = list.filter((j) => !pscPinnedIds.has(j.id) && !pinnedCampaignIds.has(j.id));
         if (rest.length === 0) return null;
         return (
           <div key={rank} className="mb-3">

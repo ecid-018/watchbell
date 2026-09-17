@@ -2,16 +2,24 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import Watchbell from "./src/Watchbell.jsx";
 import Setup from "./src/Setup.jsx";
-import { appendPhase, migrate, generateLegs, nameOf, lengthOf, legsOf, daysToArrival, daysToArrivalSigned } from "./src/phase.js";
+import { appendPhase, migrate, generateLegs, nameOf, lengthOf, legsOf, daysToArrival, daysToArrivalSigned, dateForReadingDay, dayOf, readingDayForDate, readingDayOf } from "./src/phase.js";
 import BodyTab from "./src/BodyTab.jsx";
 import JobsTab from "./src/JobsTab.jsx";
 import WeekTab from "./src/WeekTab.jsx";
 import PlansTab from "./src/PlansTab.jsx";
 import { THEME } from "./src/theme.js";
-import { doableForLeg, eveningFor, itemsForLeg, parseUtcLabel } from "./src/schedule.js";
+import { doableForLeg, eveningFor, itemsForLeg, openForUTC, parseUtcLabel, utcLabel } from "./src/schedule.js";
 import { dayDoable, dayItems, dueSoon, lostTo, recoveryOn } from "./src/events.js";
+import { applyZone, clearZone, clockAdvanceOn, declareZone, declaredZoneFor, planZoneFor, zoneChanges, zoneFor } from "./src/clock.js";
 import { CARRY_WARN, PRIORITY_RANK, autoPhotoTag, canDrop, carriedFor, carryLabel, groupByAssignee, jobsInWindow, makeJob } from "./src/jobs.js";
 import { isFromBacklog, portItemVisible, pscPinned, recurringTasksFromBacklog } from "./src/backlog.js";
+import CampaignView from "./src/CampaignView.jsx";
+import CAMPAIGN_TEMPLATES from "./src/data/campaign-templates.json";
+import {
+  TRACKER_STATUSES, campaignPinned, campaignProgress, daysToTarget, duplicateCampaign,
+  instantiateTemplate, nextCampaignId, phaseStatus, shortDue, templateProblems, trackerPatch,
+  trackerRows,
+} from "./src/campaign.js";
 import { BACKLOG } from "./src/data/jobs-backlog.js";
 import { pscReadiness } from "./src/psc.js";
 import { readExifDate } from "./src/exif.js";
@@ -20,12 +28,15 @@ import { SCHEDULE_FILENAME, SCHEDULE_SCHEMA_VERSION, SHARED_TAGS, hhmm, schedule
 import { DEFAULT_RANKS, SCHEMA } from "./src/store.js";
 import { allRefs, fetchInto, parseRef, readCached, toLines, urlFor } from "./src/bible.js";
 import { colourOf, marksIn, quote, toggleMark } from "./src/marks.js";
+import TodayView from "./src/TodayView.jsx";
 import WordTab, { REFLECT_MIN } from "./src/WordTab.jsx";
+import JournalList from "./src/JournalList.jsx";
+import { CATCHUP_WINDOW, firstLine, journalEntries, unreadDays, unreadRows } from "./src/journal.js";
 import { COOLDOWN, PLAN, RULES, WARMUP, buildIntervals, mainBlock, parseDuration, sessionForDate, timerMode } from "./src/training.js";
 import { EXERCISE_KEYS, exerciseCue, exerciseLabel } from "./src/components/ExerciseFigure.jsx";
 import { LEARNED_AT } from "./src/BodyTab.jsx";
 import { adminToday, criticalCarriedInWeek, slotSummary, taskStatus } from "./src/admin.js";
-import { addDays, dateKey, parseKey } from "./src/voyage.js";
+import { addDays, dateKey, daysBetween, parseKey } from "./src/voyage.js";
 import {
   applyFastingWindow, canStartProlongedFast, currentStage, hiitPromptEligible,
   isWindowSuspended, naturalStage, prolongedElapsedHours, windowAdherence, windowForDay, windowState,
@@ -927,6 +938,243 @@ t("a browsed chapter names itself frozen", (() => {
       browse={{ book: "GEN", chapter: 3 }} onBrowse={noop} />).replace(/<!--.*?-->/g, "");
   return browsed.includes("Genesis 3") && !browsed.includes(">TODAY<");
 })());
+
+/* -------- the campaign -------- */
+
+const TPL = CAMPAIGN_TEMPLATES[0];
+const CAMP_TODAY = "2026-09-16";
+t("the seeded template loads clean",         templateProblems(TPL).length === 0);
+t("a deadline is said the short way",        shortDue("2026-10-09") === "9 Oct" && shortDue("2026-09-22") === "22 Sep");
+t("and an absent one says nothing",          shortDue(null) === "");
+t("a template needs its dates",              templateProblems({ id: "X", title: "X", phases: [{ id: "P", name: "P" }] }).length > 0);
+t("an item seeded closed is a template error",
+  templateProblems({ id: "X", title: "X", target: "2026-01-01",
+    phases: [{ id: "P", name: "P", due: "2026-01-01", groups: [{ name: "g", items: [{ id: "a", title: "a", tracker: { owner: "CE", status: "closed" } }] }] }] })
+    .some((m) => /seeded closed/.test(m)));
+t("duplicate item ids are a template error",
+  templateProblems({ id: "X", title: "X", target: "2026-01-01",
+    phases: [{ id: "P", name: "P", due: "2026-01-01", groups: [{ name: "g", items: [{ id: "a", title: "a" }, { id: "a", title: "b" }] }] }] })
+    .some((m) => /duplicate/.test(m)));
+
+const { campaign: camp, jobs: campJobs } = instantiateTemplate(TPL, CAMP_TODAY);
+t("the audit has six phases",                camp.phases.length === 6);
+t("the whole checklist comes across",        campJobs.length === 84);
+t("every line starts in the pool",           campJobs.every((j) => j.status === "pooled"));
+t("and knows its campaign and its phase",    campJobs.every((j) => j.campaign === "AS26" && j.phase));
+t("ids are the template's, so re-import is idempotent",
+  campJobs.some((j) => j.id === "AS26-W1-09") && new Set(campJobs.map((j) => j.id)).size === 84);
+t("the sub-headings become groups",          campJobs.some((j) => j.group === "Certificates") && campJobs.some((j) => j.group === "Drills"));
+t("ten items are tracked, as the office asks",
+  campJobs.filter((j) => j.tracked).length === 10);
+t("a tracked item carries an owner that is not a rank",
+  campJobs.find((j) => j.id === "AS26-W1-11").owner === "CE / C/O");
+t("owners are not assignees",                campJobs.every((j) => j.assignee === null));
+t("a priority set in the template is not coerced away",
+  instantiateTemplate({ id: "Z", title: "Z", target: "2026-01-02",
+    phases: [{ id: "P", name: "P", due: "2026-01-01", groups: [{ name: "g", items: [{ id: "a", title: "a", priority: "defect" }] }] }] }, CAMP_TODAY)
+    .jobs[0].priority === "defect");
+t("nothing is seeded closed",                campJobs.every((j) => j.trackerStatus !== "closed"));
+t("the target is the audit day",             camp.target === "2026-10-09" && daysToTarget(camp, CAMP_TODAY) === 23);
+
+const done1 = campJobs.map((j) => (j.phase === "SC" ? { ...j, status: "done", doneOn: CAMP_TODAY } : j));
+const prog = campaignProgress(done1, camp, CAMP_TODAY);
+t("progress is a count first",               prog.closed === 5 && prog.total === 84);
+t("with the percentage beside it",           prog.pct === Math.round((5 / 84) * 100));
+t("a finished phase says so",                prog.phases.find((p) => p.id === "SC").state === "done");
+t("a dropped line is not owed and not counted",
+  campaignProgress(campJobs.map((j) => (j.phase === "AD" ? { ...j, status: "dropped" } : j)), camp, CAMP_TODAY).total === 79);
+t("nothing at all reads as a dash, not a zero",
+  campaignProgress([], { ...camp, phases: [] }, CAMP_TODAY).pct === null);
+
+const ph = { id: "P", name: "P", due: "2026-09-20" };
+t("a phase past its date is overdue",        phaseStatus({ ...ph, due: "2026-09-15" }, { closed: 0, total: 2 }, CAMP_TODAY) === "overdue");
+t("inside the week it is due soon",          phaseStatus({ ...ph, due: "2026-09-22" }, { closed: 0, total: 2 }, CAMP_TODAY) === "due-soon");
+t("beyond it, it is still ahead",            phaseStatus({ ...ph, due: "2026-10-09" }, { closed: 0, total: 2 }, CAMP_TODAY) === "later");
+t("finished outranks overdue",               phaseStatus({ ...ph, due: "2026-09-15" }, { closed: 2, total: 2 }, CAMP_TODAY) === "done");
+
+const pins = campaignPinned(campJobs, [camp], CAMP_TODAY);
+t("only work due inside the week is pinned", pins.every((j) => j.due <= "2026-09-23"));
+t("which is the two phases due on the 22nd", new Set(pins.map((j) => j.phase)).size === 2);
+t("a phase behind its date leads",
+  campaignPinned(campJobs, [{ ...camp, phases: camp.phases.map((p) => (p.id === "W1" ? { ...p, due: "2026-09-10" } : p)) }], CAMP_TODAY)[0].overdue === true);
+t("finished work is not pinned",             campaignPinned(done1, [camp], CAMP_TODAY).every((j) => j.phase !== "SC"));
+t("a closed-out campaign pins nothing",      campaignPinned(campJobs, [{ ...camp, status: "done" }], CAMP_TODAY).length === 0);
+
+const tracked = campJobs.find((j) => j.tracked);
+t("closing an item finishes the job",        trackerPatch(tracked, "closed", CAMP_TODAY).status === "done");
+t("and stamps when it was closed",           trackerPatch(tracked, "closed", CAMP_TODAY).lastStatus.date === CAMP_TODAY);
+t("re-opening it puts the job back",
+  trackerPatch({ ...tracked, status: "done" }, "in_progress", CAMP_TODAY).status === "open"
+  && trackerPatch({ ...tracked, status: "done" }, "in_progress", CAMP_TODAY).doneOn === null);
+t("any other change leaves the job alone",   trackerPatch(tracked, "awaiting_office", CAMP_TODAY).status === undefined);
+t("closed is read off the job, never stored twice",
+  trackerRows([{ ...tracked, status: "done" }], camp, {})[0].shownStatus === "closed");
+t("open items come before closed ones",
+  trackerRows(campJobs.map((j) => (j.id === "AS26-W1-09" ? { ...j, status: "done" } : j)), camp, {})
+    .map((r) => r.closed).join() === "false,false,false,false,false,false,false,false,false,true");
+t("the history comes with the row",
+  trackerRows(campJobs, camp, { [tracked.id]: [{ date: CAMP_TODAY, status: "open" }] })
+    .find((r) => r.id === tracked.id).history.length === 1);
+t("the four statuses are named",             TRACKER_STATUSES.map(([k]) => k).join() === "open,in_progress,awaiting_office,closed");
+
+t("a second campaign takes the next free id", nextCampaignId("AS26", [camp]) === "AS26-2");
+t("and the first one is used when it is free", nextCampaignId("AS26", []) === "AS26");
+const dup = duplicateCampaign(camp, done1, "2026-11-09", CAMP_TODAY, "AS26-2");
+t("every phase moves by the same offset",
+  dup.campaign.phases.every((p, i) => daysBetween(parseKey(camp.phases[i].due), parseKey(p.due)) === 31));
+t("the work comes back to the pool",         dup.jobs.every((j) => j.status === "pooled" && j.doneOn === null));
+t("with ids rebased on the new campaign",    dup.jobs.some((j) => j.id === "AS26-2-W1-09"));
+t("the tracker starts again",                dup.jobs.filter((j) => j.tracked).every((j) => j.trackerStatus === "open" && j.evidence === ""));
+t("and the original is untouched",           camp.target === "2026-10-09" && done1.find((j) => j.phase === "SC").status === "done");
+
+const CT = THEME.dark;
+const campaignLoaded = renderToString(
+  <CampaignView C={CT} dark wide jobs={campJobs} campaigns={[camp]} campaignLog={{}}
+    templates={CAMPAIGN_TEMPLATES} todayKey={CAMP_TODAY} onSet={noop} onPull={noop} onPush={noop}
+    onTrack={noop} onSetCampaign={noop} onStart={noop} onDuplicate={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("the campaign leads with a count",      campaignLoaded.includes("0/84") && campaignLoaded.includes("0% complete"));
+t("and says how long is left",            campaignLoaded.includes("23 days to target"));
+t("the phases are named with their dates", campaignLoaded.includes("Week 2: Physical readiness &amp; records") && campaignLoaded.includes("due 29 Sep"));
+t("a phase inside the week says so",      campaignLoaded.includes("DUE THIS WEEK"));
+const campaignNone = renderToString(
+  <CampaignView C={CT} dark wide={false} jobs={[]} campaigns={[]} campaignLog={{}}
+    templates={CAMPAIGN_TEMPLATES} todayKey={CAMP_TODAY} onSet={noop} onPull={noop} onPush={noop}
+    onTrack={noop} onSetCampaign={noop} onStart={noop} onDuplicate={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("with none running it offers the template",
+  campaignNone.includes("No campaign running") && /Start .{0,12}MV Queen Trader/.test(campaignNone));
+
+const todayWithCampaign = renderToString(
+  <TodayView C={CT} dark wide={false} jobs={[]} ranks={DEFAULT_RANKS} todayKey={CAMP_TODAY}
+    pscPinnedIds={new Set()} pscDeferrals={{}}
+    campaignPins={campaignPinned(campJobs, [camp], CAMP_TODAY)}
+    campaignSummary={{ ...campaignProgress(campJobs, camp, CAMP_TODAY), id: camp.id, title: camp.title }}
+    onSet={noop} onPush={noop} onDefer={noop} onPull={noop} onOpenCampaign={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("today carries the campaign's figure",  todayWithCampaign.includes("0/84"));
+t("and names the phase due next",         todayWithCampaign.includes("next: SC due 22 Sep"));
+t("work due this week is pinned onto today", todayWithCampaign.includes("CAMPAIGN — DUE THIS WEEK"));
+t("pooled work offers a way onto the list", todayWithCampaign.includes(">Pull<"));
+
+/* -------- the ship's clock, and the night it changes -------- */
+
+// Eastbound, 40 days, −5 to +5:30. The plan deals the changes out evenly; the
+// master does not. Nothing here may be inferred from the plan.
+const east = { kind: "voyage", start: "2026-03-01", from: "A", to: "B", days: 40, utc0: -5, utc1: 5.5, readOffset: 1 };
+const d5 = "2026-03-05", d6 = "2026-03-06", d7 = "2026-03-07";
+
+t("nothing declared leaves the plan in charge",
+  declaredZoneFor(null, east, d6) === null && zoneFor(null, east, d6) === planZoneFor(east, d6));
+t("and no leg boundary is ever a short night",
+  legsOf(east).every((l) => clockAdvanceOn(null, east, dateKey(addDays(parseKey(east.start), l.d0 - 1))) === null));
+t("the legacy route's boundaries are not either",
+  legsOf(legacy[0]).every((l) => clockAdvanceOn(null, legacy[0], dateKey(addDays(parseKey(legacy[0].start), l.d0 - 1))) === null));
+
+// Declared relative to what the plan already assumed the night before, so the
+// fixture tests the delta and not this file's arithmetic about legs.
+const planD5 = planZoneFor(east, d5);
+const z1 = declareZone(null, east, planD5 + 1, d6);
+t("a declaration stands from its own date",     zoneFor(z1, east, d6) === planD5 + 1);
+t("and not from the day before",                zoneFor(z1, east, d5) === planZoneFor(east, d5));
+t("the clock forward is an hour short",         clockAdvanceOn(z1, east, d6).lost === 1);
+t("and it says what did it",                    clockAdvanceOn(z1, east, d6).clock === true && clockAdvanceOn(z1, east, d6).from === "the clock");
+t("the day before is untouched",                clockAdvanceOn(z1, east, d5) === null);
+t("so is the day after",                        clockAdvanceOn(z1, east, d7) === null);
+
+const z2 = declareZone(z1, east, planD5 + 3, d7);
+t("declarations stack in date order",           zoneChanges(z2, east).map((c) => c.from).join() === `${d6},${d7}`);
+t("a two-hour jump is still one hour of sleep", clockAdvanceOn(z2, east, d7).lost === 1);
+t("re-declaring a date replaces it",            zoneChanges(declareZone(z2, east, planD5 + 2, d7), east).length === 2
+  && zoneFor(declareZone(z2, east, planD5 + 2, d7), east, d7) === planD5 + 2);
+t("the clock back is not a short night",        clockAdvanceOn(declareZone(null, east, planD5 - 1, d6), east, d6) === null);
+t("day one has no night before it",             clockAdvanceOn(declareZone(null, east, planD5 + 4, east.start), east, east.start) === null);
+t("a finished passage's log is not read for a new one",
+  zoneFor({ phaseStart: "1999-01-01", changes: [{ from: d6, offset: 9 }] }, east, d6) === planZoneFor(east, d6));
+t("following the plan again clears the log",    zoneChanges(clearZone(east), east).length === 0);
+t("alongside keeps no offset of its own",       planZoneFor(port[port.length - 1], day(1)) === null);
+
+const zLeg = applyZone(legsOf(east)[0], z1, east, d6);
+t("the cash open follows the declared zone",    zLeg.utc === utcLabel(planD5 + 1) && zLeg.open === openForUTC(planD5 + 1));
+
+// Monday 9 March 2026 is a HIIT day on the rotation.
+const HIIT_MON = "2026-03-09";
+const zHiit = declareZone(null, east, planZoneFor(east, "2026-03-08") + 1, HIIT_MON);
+const clockDay = byId(dayItems(seaLeg, HIIT_MON, [], { clock: clockAdvanceOn(zHiit, east, HIIT_MON) }));
+const plainDay = byId(dayItems(seaLeg, HIIT_MON, []));
+t("the morning starts an hour later",           clockDay.wake.t === "0630" && clockDay.wake.shifted);
+t("the whole morning moves together",           clockDay.prep.t === "0740" && clockDay.word.t === "0635");
+t("the afternoon does not",                     clockDay.sleep.t === plainDay.sleep.t);
+t("the desk keeps its hours",                   !clockDay.trade.stood);
+t("the session goes lighter, not away",         clockDay.train.lighter === true && !clockDay.train.stood);
+t("so nothing is taken off the day",            dayDoable(seaLeg, HIIT_MON, [], { clock: clockAdvanceOn(zHiit, east, HIIT_MON) }).length === dayDoable(seaLeg, HIIT_MON, []).length);
+
+const overnightThen = { date: "2026-03-08", type: "Bunkering", start: "20:00", hours: 7 };
+const both = byId(dayItems(seaLeg, HIIT_MON, [overnightThen], { clock: clockAdvanceOn(zHiit, east, HIIT_MON) }));
+t("a night's work outranks the clock",          both.trade.stood && both.wake.t === "0830");
+
+/* -------- the journal, and the days it is behind -------- */
+
+// A ten-day passage, forty-five days ago. The rail holds at day 10; the
+// reading counter must not.
+const over = { kind: "voyage", start: "2026-01-01", from: "A", to: "B", days: 10, utc0: 0, utc1: 0, readOffset: 1 };
+const overrun = parseKey("2026-02-14");                                   // day 45 of a 10-day passage
+t("the rail holds at the end of the passage",  dayOf(over, overrun) === 10);
+t("the reading counter does not",              readingDayForDate(over, overrun) === 45);
+t("held, every later date would key onto one day",
+  readingDayOf(over, dayOf(over, overrun)) === readingDayOf(over, dayOf(over, parseKey("2026-02-20"))));
+t("unclamped, they do not",
+  readingDayForDate(over, overrun) !== readingDayForDate(over, parseKey("2026-02-20")));
+t("day one is still day one",                  readingDayForDate(over, parseKey("2026-01-01")) === 1);
+
+const twoPhases = [over, { kind: "voyage", start: "2026-01-11", from: "B", to: "C", days: 10, utc0: 0, utc1: 0, readOffset: 11 }];
+t("a reading day knows the date it fell on",   dateForReadingDay(twoPhases, 1) === "2026-01-01");
+t("and across a phase join",                   dateForReadingDay(twoPhases, 11) === "2026-01-11");
+t("and inside the later phase",                dateForReadingDay(twoPhases, 15) === "2026-01-15");
+t("a day before the first phase has no date",  dateForReadingDay([{ ...over, readOffset: 5 }], 2) === null);
+t("the round trip holds",
+  readingDayForDate(over, parseKey(dateForReadingDay([over], 7))) === 7);
+
+t("a day never marked is unread",              unreadDays({}, 1, 5).join() === "1,2,3,4");
+t("a day marked read is not",                  unreadDays({ 2: true }, 1, 5).join() === "1,3,4");
+t("a day un-read on purpose is unread again",  unreadDays({ 2: false }, 1, 5).includes(2));
+t("today is never owed",                       !unreadDays({}, 1, 5).includes(5));
+t("the catch-up list has a floor",             CATCHUP_WINDOW === 45 && unreadDays({}, 3, 5).join() === "3,4");
+t("an unread row carries its chapters",
+  unreadRows([7], [over])[0].plan.psalm === "Psalm 7" && unreadRows([7], [over])[0].date === "2026-01-07");
+
+const jReflect = { 3: "The third day, written on the day.", 9: "  ", 12: "Caught up a week late." };
+const jDates = { 12: "2026-01-19" };
+const jEntries = journalEntries(jReflect, jDates, [over]);
+t("the journal runs newest first",             jEntries.map((e) => e.day).join() === "12,3");
+t("a blank reflection is not an entry",        !jEntries.some((e) => e.day === 9));
+t("an entry knows its reading day's date",     jEntries[1].date === "2026-01-03");
+t("and when it was actually written",          jEntries[0].writtenOn === "2026-01-19" && jEntries[0].date === "2026-01-12");
+t("an unstamped entry says nothing it cannot", jEntries[1].writtenOn === null);
+t("a long reflection is cut to one line",      firstLine("x".repeat(200)).length === 90);
+
+const journalSide = renderToString(
+  <JournalList C={TD} unread={unreadRows([3, 4], [over])} entries={jEntries} shownReadDay={12} onOpen={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("the days owed are named and counted",       journalSide.includes("2 READING DAYS UNREAD") && journalSide.includes("D03"));
+t("the journal lists what was written",        journalSide.includes("JOURNAL · 2") && journalSide.includes("Caught up a week late"));
+t("a late entry shows both dates",             journalSide.includes("written 19 Jan"));
+const journalEmpty = renderToString(
+  <JournalList C={TD} unread={[]} entries={[]} shownReadDay={1} onOpen={noop} />,
+).replace(/<!--.*?-->/g, "");
+t("nothing owed means no banner",              !journalEmpty.includes("UNREAD"));
+t("an empty journal says so",                  journalEmpty.includes("Nothing written yet"));
+
+const plansPersisted = renderToString(
+  <PlansTab C={TD} dark wide={false} plans={[]} today={new Date(2026, 7, 26)} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop}
+    quota={{ usage: 1024, quota: 10240, pct: 10, persisted: true }} />,
+).replace(/<!--.*?-->/g, "");
+t("a persistent origin says so",               plansPersisted.includes("persistent"));
+const plansEvictable = renderToString(
+  <PlansTab C={TD} dark wide={false} plans={[]} today={new Date(2026, 7, 26)} onAdd={noop} onSet={noop} onSpawn={noop} onExport={noop}
+    quota={{ usage: 1024, quota: 10240, pct: 10, persisted: false }} />,
+).replace(/<!--.*?-->/g, "");
+t("an evictable one warns plainly",            plansEvictable.includes("may clear this"));
 
 /* -------- the whole canon -------- */
 

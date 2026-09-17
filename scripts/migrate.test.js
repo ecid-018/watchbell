@@ -43,6 +43,12 @@ function assert(name, condition) {
   }
 }
 
+// Clears the mock, and only the mock. storage.js also keeps a session copy of
+// every key it has written and falls back to that when localStorage comes back
+// empty — the right answer on a device the browser evicted mid-session, but it
+// means the last section's data still reads through here. A section that cares
+// writes the empty state it starts from; only the first one below is reached
+// with the session copy genuinely cold.
 function resetStorage() {
   mockStorage.clear();
 }
@@ -52,14 +58,15 @@ async function runTests() {
 
   resetStorage();
   const schema1 = migrateStores();
-  assert("Fresh install creates schema 3", schema1 === 3);
+  assert("Fresh install creates the current schema", schema1 === SCHEMA);
   assert("Fresh install creates all stores", 
     readJSON(K.jobs, null) !== null &&
     readJSON(K.plans, null) !== null &&
     readJSON(K.events, null) !== null &&
     readJSON(K.weeks, null) !== null &&
     readJSON(K.ranks, null) !== null &&
-    readJSON(K.marks, null) !== null);
+    readJSON(K.marks, null) !== null &&
+    readJSON(K.campaigns, null) !== null);
   assert("Fresh install uses DEFAULT_RANKS", 
     JSON.stringify(readJSON(K.ranks)) === JSON.stringify(DEFAULT_RANKS));
 
@@ -69,7 +76,7 @@ async function runTests() {
   writeJSON(K.start, day1);
   writeJSON(K.schema, 1);
   const schema2 = migrateStores();
-  assert("v1 -> v3 migration works", schema2 === 3);
+  assert("v1 migrates to the current schema", schema2 === SCHEMA);
   assert("v1 phases preserved", readJSON(K.phases).length === 1);
   assert("v1 creates new stores", readJSON(K.jobs) !== null);
 
@@ -82,7 +89,7 @@ async function runTests() {
   writeJSON(K.ranks, DEFAULT_RANKS);
   writeJSON(K.schema, 2);
   const schema3 = migrateStores();
-  assert("v2 -> v3 migration works", schema3 === 3);
+  assert("v2 migrates to the current schema", schema3 === SCHEMA);
   assert("v2 creates marks store", readJSON(K.marks) !== null);
 
   resetStorage();
@@ -146,6 +153,7 @@ async function runTests() {
   writeJSON(K.mode, "dark");
   writeJSON(K.read, { [day1]: true });
   writeJSON(K.reflect, { [day1]: "Reflection" });
+  writeJSON(K.reflectDates, { [day1]: day1 });
   writeJSON(K.figures, { "dead-bug": 3 });
   const logKey = K.log(day1);
   writeJSON(logKey, { wake: true, word: true });
@@ -161,6 +169,9 @@ async function runTests() {
   assert("Export includes weeks", exported.data[K.weeks] !== undefined);
   assert("Export includes ranks", exported.data[K.ranks] !== undefined);
   assert("Export includes marks", exported.data[K.marks] !== undefined);
+  assert("Export includes campaigns", exported.data[K.campaigns] !== undefined);
+  assert("Export includes reflections", exported.data[K.reflect] !== undefined);
+  assert("Export includes when each reflection was written", exported.data[K.reflectDates] !== undefined);
   assert("Export includes mode", exported.data[K.mode] !== undefined);
   assert("Export includes daily logs", exported.data[logKey] !== undefined);
   assert("Export includes training logs", exported.data[trainKey] !== undefined);
@@ -251,7 +262,51 @@ async function runTests() {
     afterPartial.find((j) => j.id === nonWeekly[0].id).status === "open");
   assert("Import still backfills whatever else is missing", afterPartial.length === nonWeekly.length);
 
-  console.log("\n=== Results: " + passed + " passed, " + failed + " failed ===");
+  /* -------- campaigns -------- */
+console.log("\n=== Campaign seed ===\n");
+{
+  const { importCampaigns } = await import("../src/campaign.js");
+  const { readFileSync } = await import("node:fs");
+  const TEMPLATES = JSON.parse(readFileSync(new URL("../src/data/campaign-templates.json", import.meta.url), "utf8"));
+  const today = dateKey(new Date());
+
+  // Not resetStorage() alone: the backlog import above left its jobs in the
+  // session copy, and they would be counted as campaign work below.
+  resetStorage();
+  writeJSON(K.jobs, []);
+  writeJSON(K.campaigns, []);
+
+  const first = importCampaigns(TEMPLATES, today);
+  const campaigns = readJSON(K.campaigns, []);
+  const jobs = readJSON(K.jobs, []);
+  assert("Seed import creates the campaign", campaigns.length === 1 && campaigns[0].id === "AS26");
+  assert("Seed import copies the phases", campaigns[0].phases.length === 6);
+  assert("Seed import pools the whole checklist", first.jobs === 84 && jobs.length === 84);
+  assert("Every seeded job is pooled and knows its campaign",
+    jobs.every((j) => j.status === "pooled" && j.campaign === "AS26" && j.phase));
+
+  const again = importCampaigns(TEMPLATES, today);
+  assert("A second import adds nothing", again.campaigns === 0 && again.jobs === 0);
+  assert("And does not duplicate the jobs", readJSON(K.jobs, []).length === 84);
+
+  writeJSON(K.jobs, readJSON(K.jobs, []).map((j) => (j.id === "AS26-W1-09" ? { ...j, status: "done", doneOn: today } : j)));
+  importCampaigns(TEMPLATES, today);
+  assert("Import never overwrites a job already worked",
+    readJSON(K.jobs, []).find((j) => j.id === "AS26-W1-09").status === "done");
+
+  writeJSON(K.jobs, readJSON(K.jobs, []).filter((j) => j.id !== "AS26-AD-05"));
+  const backfilled = importCampaigns(TEMPLATES, today);
+  assert("A line added to the file later joins a campaign already running", backfilled.jobs === 1);
+
+  resetStorage();
+  writeJSON(K.schema, 3);
+  writeJSON(K.jobs, [{ id: "job1" }]);
+  migrateStores();
+  assert("v3 to v4 creates the campaigns store", Array.isArray(readJSON(K.campaigns, null)));
+  assert("And leaves the jobs it found alone", readJSON(K.jobs, [])[0].id === "job1");
+}
+
+console.log("\n=== Results: " + passed + " passed, " + failed + " failed ===");
   process.exit(failed > 0 ? 1 : 0);
 }
 

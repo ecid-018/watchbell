@@ -10,13 +10,14 @@
 
 import { K, readJSON, writeJSON, writeSnapshot } from "./storage.js";
 
-export const SCHEMA = 3;
+export const SCHEMA = 4;
 
 /** Ranks, not names — the list is edited on the Standing tab. */
 export const DEFAULT_RANKS = ["Self", "2/E", "3/E", "4/E", "Oiler", "Fitter", "Wiper"];
 
 const STORES = {
   jobs: [],
+  campaigns: [],
   plans: [],
   events: [],
   weeks: {},
@@ -44,6 +45,10 @@ export function migrateStores() {
   // 2 → 3: highlighted verses. Same shape of migration: create it empty.
   if (at < 3 && readJSON(K.marks, null) === null) writeJSON(K.marks, {});
 
+  // 3 → 4: campaigns — a run of work with a date on the end of it. Created
+  // empty; the seed loader in App.jsx fills it on the next boot.
+  if (at < 4 && readJSON(K.campaigns, null) === null) writeJSON(K.campaigns, []);
+
   if (migrating) {
     writeJSON(K.schema, SCHEMA);
     // A snapshot of the freshly migrated data, so a schema that turns out to
@@ -70,7 +75,7 @@ export const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${(seq++).
  */
 export function exportAll() {
   const out = { app: "watchbell", schema: SCHEMA, exported: new Date().toISOString(), data: {} };
-  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "figures", "mode", "adminCompletions", "adminDeferrals", "fasting", "prolongedFast", "prolongedFastLog", "utcOverride", "pscDeferrals", "reportProfile"]) {
+  for (const name of ["jobs", "plans", "events", "weeks", "ranks", "marks", "phases", "read", "reflect", "reflectDates", "figures", "mode", "adminCompletions", "adminDeferrals", "fasting", "prolongedFast", "prolongedFastLog", "utcOverride", "shipZone", "pscDeferrals", "campaigns", "campaignLog", "reportProfile"]) {
     const v = readJSON(K[name], null);
     if (v !== null) out.data[K[name]] = v;
   }

@@ -349,6 +349,16 @@ export default function PlansTab({
                   Storage: {quota.pct}% used ({Math.round(quota.usage / 1024)} KB of {Math.round(quota.quota / 1024)} KB)
                 </span>
               )}
+              {quota && quota.persisted === true && (
+                <span style={{ display: "block", marginTop: 2, color: C.dim2 }}>
+                  This origin is persistent — iOS has agreed not to evict it.
+                </span>
+              )}
+              {quota && quota.persisted === false && (
+                <span style={{ display: "block", marginTop: 2, color: C.oxide }}>
+                  Not persistent — iOS may clear this under storage pressure. Export regularly.
+                </span>
+              )}
             </div>
 
             {reportProfile && (
